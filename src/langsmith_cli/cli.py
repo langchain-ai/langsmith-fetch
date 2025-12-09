@@ -30,11 +30,18 @@ def main():
 
 
 @main.command()
-@click.argument('thread_id', metavar='THREAD_ID')
-@click.option('--project-uuid', metavar='UUID',
-              help='LangSmith project UUID (overrides config). Find in UI or via trace session_id.')
-@click.option('--format', 'format_type', type=click.Choice(['raw', 'json', 'pretty']),
-              help='Output format: raw (compact JSON), json (pretty JSON), pretty (human-readable panels)')
+@click.argument("thread_id", metavar="THREAD_ID")
+@click.option(
+    "--project-uuid",
+    metavar="UUID",
+    help="LangSmith project UUID (overrides config). Find in UI or via trace session_id.",
+)
+@click.option(
+    "--format",
+    "format_type",
+    type=click.Choice(["raw", "json", "pretty"]),
+    help="Output format: raw (compact JSON), json (pretty JSON), pretty (human-readable panels)",
+)
 def thread(thread_id, project_uuid, format_type):
     """Fetch messages for a LangGraph thread by thread_id.
 
@@ -77,9 +84,12 @@ def thread(thread_id, project_uuid, format_type):
     """
 
     # Get API key
+    base_url = config.get_base_url()
     api_key = config.get_api_key()
     if not api_key:
-        click.echo("Error: LANGSMITH_API_KEY not found in environment or config", err=True)
+        click.echo(
+            "Error: LANGSMITH_API_KEY not found in environment or config", err=True
+        )
         sys.exit(1)
 
     # Get project UUID (from option or config)
@@ -87,7 +97,10 @@ def thread(thread_id, project_uuid, format_type):
         project_uuid = config.get_project_uuid()
 
     if not project_uuid:
-        click.echo("Error: project-uuid required. Set with: langsmith-fetch config set project-uuid <uuid>", err=True)
+        click.echo(
+            "Error: project-uuid required. Set with: langsmith-fetch config set project-uuid <uuid>",
+            err=True,
+        )
         sys.exit(1)
 
     # Get format (from option or config)
@@ -96,7 +109,9 @@ def thread(thread_id, project_uuid, format_type):
 
     try:
         # Fetch messages
-        messages = fetchers.fetch_thread(thread_id, project_uuid, api_key)
+        messages = fetchers.fetch_thread(
+            thread_id, project_uuid, base_url=base_url, api_key=api_key
+        )
 
         # Output
         formatters.print_formatted(messages, format_type)
@@ -107,9 +122,13 @@ def thread(thread_id, project_uuid, format_type):
 
 
 @main.command()
-@click.argument('trace_id', metavar='TRACE_ID')
-@click.option('--format', 'format_type', type=click.Choice(['raw', 'json', 'pretty']),
-              help='Output format: raw (compact JSON), json (pretty JSON), pretty (human-readable panels)')
+@click.argument("trace_id", metavar="TRACE_ID")
+@click.option(
+    "--format",
+    "format_type",
+    type=click.Choice(["raw", "json", "pretty"]),
+    help="Output format: raw (compact JSON), json (pretty JSON), pretty (human-readable panels)",
+)
 def trace(trace_id, format_type):
     """Fetch messages for a single trace by trace ID.
 
@@ -142,9 +161,12 @@ def trace(trace_id, format_type):
     """
 
     # Get API key
+    base_url = config.get_base_url()
     api_key = config.get_api_key()
     if not api_key:
-        click.echo("Error: LANGSMITH_API_KEY not found in environment or config", err=True)
+        click.echo(
+            "Error: LANGSMITH_API_KEY not found in environment or config", err=True
+        )
         sys.exit(1)
 
     # Get format (from option or config)
@@ -153,7 +175,7 @@ def trace(trace_id, format_type):
 
     try:
         # Fetch messages
-        messages = fetchers.fetch_trace(trace_id, api_key)
+        messages = fetchers.fetch_trace(trace_id, base_url=base_url, api_key=api_key)
 
         # Output
         formatters.print_formatted(messages, format_type)
@@ -186,9 +208,9 @@ def config_cmd():
     pass
 
 
-@config_cmd.command('set')
-@click.argument('key', metavar='KEY')
-@click.argument('value', metavar='VALUE')
+@config_cmd.command("set")
+@click.argument("key", metavar="KEY")
+@click.argument("value", metavar="VALUE")
 def config_set(key, value):
     """Set a configuration value.
 
@@ -211,7 +233,7 @@ def config_set(key, value):
         sys.exit(1)
 
 
-@config_cmd.command('show')
+@config_cmd.command("show")
 def config_show():
     """Show current configuration.
 
@@ -238,7 +260,7 @@ def config_show():
         click.echo(f"Location: {config.CONFIG_FILE}\n")
         for key, value in cfg.items():
             # Hide API key for security
-            if key == 'api_key':
+            if key == "api_key":
                 value = value[:10] + "..." if value else "(not set)"
             click.echo(f"  {key}: {value}")
     except Exception as e:
@@ -247,8 +269,8 @@ def config_show():
 
 
 # Register config subcommands under main CLI
-main.add_command(config_cmd, name='config')
+main.add_command(config_cmd, name="config")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
