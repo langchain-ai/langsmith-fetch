@@ -97,6 +97,21 @@ LangSmith organizes data into three levels:
 
 Learn more in the [LangSmith threads documentation](https://docs.langchain.com/langsmith/threads).
 
+### Command Overview
+
+| Command | What it fetches | Output |
+|---------|----------------|--------|
+| `latest` | Single most recent **trace** (by time) | stdout or file |
+| `trace <id>` | Specific **trace** by ID | stdout or file |
+| `thread <id>` | Specific **thread** by ID | stdout or file |
+| `threads <dir>` | Multiple recent **threads** (bulk) | Multiple JSON files in directory |
+
+**When to use each:**
+- **`latest`** - "I just ran something and want to see the trace"
+- **`trace <id>`** - "I have a specific trace ID from the UI"
+- **`thread <id>`** - "I have a specific thread ID and want all its messages"
+- **`threads <dir>`** - "I want to download multiple threads for batch processing"
+
 ### Where to find each ID
 
 You can find each ID in the LangSmith UI as shown in the screenshots below:
