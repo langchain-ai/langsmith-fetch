@@ -161,9 +161,18 @@ langsmith-fetch threads ./my-threads --limit 25
 
 # Override project UUID
 langsmith-fetch threads ./my-threads --project-uuid <uuid>
+
+# Customize filename pattern
+langsmith-fetch threads ./my-threads --filename-pattern "thread_{index:03d}.json"
+# Creates: thread_001.json, thread_002.json, etc.
 ```
 
-This creates one JSON file per thread in the specified output directory, with each file named by the thread_id.
+**File Naming:**
+- Default: Files named by thread ID (e.g., `abc123def.json`)
+- Custom pattern: Use `--filename-pattern` with placeholders:
+  - `{thread_id}` - Thread ID (default: `{thread_id}.json`)
+  - `{index}` or `{idx}` - Sequential number starting from 1
+  - Format specs supported: `{index:03d}` for zero-padded numbers
 
 ### Fetch Thread by LangGraph thread_id
 
