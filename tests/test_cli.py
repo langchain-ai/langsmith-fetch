@@ -7,7 +7,7 @@ import responses
 from unittest.mock import Mock, patch
 
 from langsmith_cli.cli import main
-from tests.conftest import TEST_TRACE_ID, TEST_THREAD_ID, TEST_PROJECT_UUID, TEST_API_KEY
+from tests.conftest import TEST_TRACE_ID, TEST_THREAD_ID, TEST_PROJECT_UUID, TEST_API_KEY, TEST_BASE_URL
 
 
 class TestTraceCommand:

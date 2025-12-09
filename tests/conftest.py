@@ -12,6 +12,7 @@ TEST_TRACE_ID = "3b0b15fe-1e3a-4aef-afa8-48df15879cfe"
 TEST_THREAD_ID = "test-email-agent-thread"
 TEST_PROJECT_UUID = "80f1ecb3-a16b-411e-97ae-1c89adbb5c49"
 TEST_API_KEY = "lsv2_test_key_123"
+TEST_BASE_URL = "https://api.smith.langchain.com"
 
 
 @pytest.fixture
@@ -83,3 +84,10 @@ def temp_config_dir():
 def mock_env_api_key(monkeypatch):
     """Mock LANGSMITH_API_KEY environment variable."""
     monkeypatch.setenv('LANGSMITH_API_KEY', TEST_API_KEY)
+
+
+@pytest.fixture(autouse=True)
+def mock_base_url(monkeypatch):
+    """Mock get_base_url to return TEST_BASE_URL."""
+    from langsmith_cli import config
+    monkeypatch.setattr(config, 'get_base_url', lambda: TEST_BASE_URL)

@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 from datetime import datetime, timezone
 
 from langsmith_cli import fetchers
-from tests.conftest import TEST_TRACE_ID, TEST_THREAD_ID, TEST_PROJECT_UUID, TEST_API_KEY
+from tests.conftest import TEST_TRACE_ID, TEST_THREAD_ID, TEST_PROJECT_UUID, TEST_API_KEY, TEST_BASE_URL
 
 
 class TestFetchTrace:
@@ -23,7 +23,7 @@ class TestFetchTrace:
             status=200
         )
 
-        messages = fetchers.fetch_trace(TEST_TRACE_ID, TEST_API_KEY)
+        messages = fetchers.fetch_trace(TEST_TRACE_ID, base_url=TEST_BASE_URL, api_key=TEST_API_KEY)
 
         assert isinstance(messages, list)
         assert len(messages) == 3
@@ -41,7 +41,7 @@ class TestFetchTrace:
         )
 
         with pytest.raises(Exception):
-            fetchers.fetch_trace(TEST_TRACE_ID, TEST_API_KEY)
+            fetchers.fetch_trace(TEST_TRACE_ID, base_url=TEST_BASE_URL, api_key=TEST_API_KEY)
 
     @responses.activate
     def test_fetch_trace_api_key_sent(self, sample_trace_response):
@@ -53,7 +53,7 @@ class TestFetchTrace:
             status=200
         )
 
-        fetchers.fetch_trace(TEST_TRACE_ID, TEST_API_KEY)
+        fetchers.fetch_trace(TEST_TRACE_ID, base_url=TEST_BASE_URL, api_key=TEST_API_KEY)
 
         # Check that the request was made with correct headers
         assert len(responses.calls) == 1
@@ -73,7 +73,7 @@ class TestFetchThread:
             status=200
         )
 
-        messages = fetchers.fetch_thread(TEST_THREAD_ID, TEST_PROJECT_UUID, TEST_API_KEY)
+        messages = fetchers.fetch_thread(TEST_THREAD_ID, TEST_PROJECT_UUID, base_url=TEST_BASE_URL, api_key=TEST_API_KEY)
 
         assert isinstance(messages, list)
         assert len(messages) == 3
@@ -90,7 +90,7 @@ class TestFetchThread:
             status=200
         )
 
-        fetchers.fetch_thread(TEST_THREAD_ID, TEST_PROJECT_UUID, TEST_API_KEY)
+        fetchers.fetch_thread(TEST_THREAD_ID, TEST_PROJECT_UUID, base_url=TEST_BASE_URL, api_key=TEST_API_KEY)
 
         # Check that the request was made with correct params
         assert len(responses.calls) == 1
@@ -111,7 +111,7 @@ class TestFetchThread:
         )
 
         with pytest.raises(Exception):
-            fetchers.fetch_thread(TEST_THREAD_ID, TEST_PROJECT_UUID, TEST_API_KEY)
+            fetchers.fetch_thread(TEST_THREAD_ID, TEST_PROJECT_UUID, base_url=TEST_BASE_URL, api_key=TEST_API_KEY)
 
     @responses.activate
     def test_fetch_thread_parses_multiline_json(self, sample_thread_response):
@@ -123,7 +123,7 @@ class TestFetchThread:
             status=200
         )
 
-        messages = fetchers.fetch_thread(TEST_THREAD_ID, TEST_PROJECT_UUID, TEST_API_KEY)
+        messages = fetchers.fetch_thread(TEST_THREAD_ID, TEST_PROJECT_UUID, base_url=TEST_BASE_URL, api_key=TEST_API_KEY)
 
         # Should have parsed all messages from newline-separated format
         assert len(messages) == 3
@@ -155,7 +155,9 @@ class TestFetchLatestTrace:
             status=200
         )
 
-        messages = fetchers.fetch_latest_trace(api_key=TEST_API_KEY)
+        messages = fetchers.fetch_latest_trace(
+            api_key=TEST_API_KEY,
+            base_url=TEST_BASE_URL)
 
         # Verify Client was instantiated with correct API key
         mock_client_class.assert_called_once_with(api_key=TEST_API_KEY)
@@ -179,7 +181,7 @@ class TestFetchLatestTrace:
         mock_client_class.return_value = mock_client
 
         with pytest.raises(ValueError, match="No traces found matching criteria"):
-            fetchers.fetch_latest_trace(api_key=TEST_API_KEY)
+            fetchers.fetch_latest_trace(api_key=TEST_API_KEY, base_url=TEST_BASE_URL)
 
     @responses.activate
     @patch('langsmith.Client')
@@ -202,6 +204,7 @@ class TestFetchLatestTrace:
 
         messages = fetchers.fetch_latest_trace(
             api_key=TEST_API_KEY,
+            base_url=TEST_BASE_URL,
             project_uuid=TEST_PROJECT_UUID
         )
 
@@ -234,6 +237,7 @@ class TestFetchLatestTrace:
 
         messages = fetchers.fetch_latest_trace(
             api_key=TEST_API_KEY,
+            base_url=TEST_BASE_URL,
             last_n_minutes=30
         )
 
@@ -267,6 +271,7 @@ class TestFetchLatestTrace:
         since_timestamp = '2025-12-09T10:00:00Z'
         messages = fetchers.fetch_latest_trace(
             api_key=TEST_API_KEY,
+            base_url=TEST_BASE_URL,
             since=since_timestamp
         )
 
@@ -297,7 +302,9 @@ class TestFetchLatestTrace:
             status=200
         )
 
-        messages = fetchers.fetch_latest_trace(api_key=TEST_API_KEY, project_uuid=None)
+        messages = fetchers.fetch_latest_trace(
+            api_key=TEST_API_KEY,
+            base_url=TEST_BASE_URL, project_uuid=None)
 
         # Verify list_runs was called WITHOUT project_id parameter
         call_kwargs = mock_client.list_runs.call_args[1]
