@@ -44,9 +44,9 @@ def main():
       - Project UUID (required for thread fetching only)
 
     COMMON COMMANDS:
-      langsmith-fetch latest                              # Fetch most recent trace
-      langsmith-fetch trace <trace-id>                    # Fetch a single trace
-      langsmith-fetch thread <thread-id>                  # Fetch single thread
+      langsmith-fetch latest                              # Fetch most recent trace (by time)
+      langsmith-fetch trace <trace-id>                    # Fetch a specific trace by ID
+      langsmith-fetch thread <thread-id>                  # Fetch a specific thread by ID
       langsmith-fetch threads <output-dir> --limit 10     # Fetch recent threads (bulk)
       langsmith-fetch config set project-uuid <uuid>      # Configure project UUID
       langsmith-fetch config set api-key <key>            # Store API key in config
@@ -60,12 +60,17 @@ def main():
     FOR LLMs AND AUTOMATION:
       When fetching data programmatically, use these guidelines:
 
-      SINGLE TRACE/THREAD (use stdout or --file):
-        langsmith-fetch latest --format raw | jq
-        langsmith-fetch trace <id> --file output.json
-        langsmith-fetch thread <id> --file output.json
+      FETCH BY ID (when you have a specific trace/thread ID):
+        langsmith-fetch trace <trace-id> --format raw
+        langsmith-fetch thread <thread-id> --format raw
 
-      MULTIPLE THREADS (use threads command with directory):
+      FETCH MOST RECENT TRACE (by chronological time):
+        langsmith-fetch latest --project-uuid <uuid> --format raw
+        WARNING: Without --project-uuid, searches ALL projects chronologically.
+        May not return the trace you expect. Always specify --project-uuid or
+        use time filters (--last-n-minutes or --since) to target the right trace.
+
+      BULK FETCH MULTIPLE THREADS (saves to directory):
         langsmith-fetch threads ./output-folder --limit 10
         # Creates one JSON file per thread in output-folder/
 
@@ -451,11 +456,20 @@ def threads(output_dir, project_uuid, limit, filename_pattern):
     help="Save output to file instead of printing to stdout",
 )
 def latest(project_uuid, format_type, last_n_minutes, since, output_file):
-    """Fetch the most recent trace from LangSmith.
+    """Fetch the most recent trace from LangSmith BY CHRONOLOGICAL TIME.
 
-    Automatically finds and fetches the latest root trace without needing to manually
-    copy trace IDs from the UI. Perfect for the workflow: "I just did a thing and I
-    want the CLI to just grab the trace."
+    IMPORTANT: This fetches the trace with the most recent timestamp, not "the trace
+    from my most recent run". Without filters, it searches ALL projects and returns
+    whichever trace has the latest timestamp across your entire LangSmith account.
+
+    RECOMMENDED USAGE: Always specify --project-uuid to target a specific project,
+    or use time filters (--last-n-minutes or --since) to narrow the search.
+
+    \b
+    WHAT THIS DOES:
+      1. Searches for root traces (not child runs) in LangSmith
+      2. Finds the trace with the most recent start_time timestamp
+      3. Returns the messages from that trace
 
     \b
     RETURNS:
@@ -463,23 +477,23 @@ def latest(project_uuid, format_type, last_n_minutes, since, output_file):
 
     \b
     EXAMPLES:
-      # Fetch most recent trace across all projects
-      langsmith-fetch latest
-
-      # Fetch most recent trace from a specific project
+      # RECOMMENDED: Fetch most recent trace from a specific project
       langsmith-fetch latest --project-uuid 80f1ecb3-a16b-411e-97ae-1c89adbb5c49
 
-      # Fetch most recent trace from last 30 minutes
+      # Fetch most recent trace from last 30 minutes (any project)
       langsmith-fetch latest --last-n-minutes 30
 
-      # Fetch most recent trace since a specific time
+      # Fetch most recent trace since a specific time (any project)
       langsmith-fetch latest --since 2025-12-09T10:00:00Z
 
+      # WARNING: Searches ALL projects - may return unexpected results
+      langsmith-fetch latest
+
       # Fetch with JSON output format
-      langsmith-fetch latest --format json
+      langsmith-fetch latest --project-uuid <uuid> --format json
 
       # Save to file
-      langsmith-fetch latest --file latest.json --format raw
+      langsmith-fetch latest --project-uuid <uuid> --file latest.json --format raw
 
     \b
     PREREQUISITES:
@@ -488,20 +502,22 @@ def latest(project_uuid, format_type, last_n_minutes, since, output_file):
 
     \b
     OPTIONS:
-      --project-uuid      Optional filter to search only within a specific project.
-                          If not provided, searches across all projects.
+      --project-uuid      Filter to search only within a specific project (RECOMMENDED).
+                          Without this, searches ALL projects chronologically.
 
-      --last-n-minutes    Optional time window to limit search (mutually exclusive with --since)
+      --last-n-minutes    Time window to limit search (mutually exclusive with --since)
 
-      --since             Optional ISO timestamp to limit search (mutually exclusive with --last-n-minutes)
+      --since             ISO timestamp to limit search (mutually exclusive with --last-n-minutes)
 
       --format            Output format (raw, json, or pretty)
 
     \b
     NOTES:
-      - This command fetches the most recent TRACE only
-      - Thread support via SDK is not yet available but will be added in a future release
-      - The command searches for root traces only (not child runs)
+      - This command fetches TRACES only (not threads)
+      - Searches for root traces only (not child runs)
+      - Returns the trace with the latest timestamp (chronologically most recent)
+      - To fetch a specific trace by ID, use: langsmith-fetch trace <trace-id>
+      - To fetch a specific thread by ID, use: langsmith-fetch thread <thread-id>
     """
 
     # Validate mutually exclusive time filters
