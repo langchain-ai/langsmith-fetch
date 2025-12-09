@@ -43,7 +43,13 @@ def main():
     type=click.Choice(["raw", "json", "pretty"]),
     help="Output format: raw (compact JSON), json (pretty JSON), pretty (human-readable panels)",
 )
-def thread(thread_id, project_uuid, format_type):
+@click.option(
+    "--file",
+    "output_file",
+    metavar="PATH",
+    help="Save output to file instead of printing to stdout",
+)
+def thread(thread_id, project_uuid, format_type, output_file):
     """Fetch messages for a LangGraph thread by thread_id.
 
     A thread represents a conversation or session containing multiple traces. Each
@@ -115,7 +121,7 @@ def thread(thread_id, project_uuid, format_type):
         )
 
         # Output
-        formatters.print_formatted(messages, format_type)
+        formatters.print_formatted(messages, format_type, output_file)
 
     except Exception as e:
         click.echo(f"Error fetching thread: {e}", err=True)
@@ -130,7 +136,13 @@ def thread(thread_id, project_uuid, format_type):
     type=click.Choice(["raw", "json", "pretty"]),
     help="Output format: raw (compact JSON), json (pretty JSON), pretty (human-readable panels)",
 )
-def trace(trace_id, format_type):
+@click.option(
+    "--file",
+    "output_file",
+    metavar="PATH",
+    help="Save output to file instead of printing to stdout",
+)
+def trace(trace_id, format_type, output_file):
     """Fetch messages for a single trace by trace ID.
 
     A trace represents a single execution path containing multiple runs (LLM calls,
@@ -179,7 +191,7 @@ def trace(trace_id, format_type):
         messages = fetchers.fetch_trace(trace_id, base_url=base_url, api_key=api_key)
 
         # Output
-        formatters.print_formatted(messages, format_type)
+        formatters.print_formatted(messages, format_type, output_file)
 
     except Exception as e:
         click.echo(f"Error fetching trace: {e}", err=True)
@@ -195,7 +207,9 @@ def trace(trace_id, format_type):
               help='Only search traces from the last N minutes')
 @click.option('--since', metavar='TIMESTAMP',
               help='Only search traces since ISO timestamp (e.g., 2025-12-09T10:00:00Z)')
-def latest(project_uuid, format_type, last_n_minutes, since):
+@click.option('--file', 'output_file', metavar='PATH',
+              help='Save output to file instead of printing to stdout')
+def latest(project_uuid, format_type, last_n_minutes, since, output_file):
     """Fetch the most recent trace from LangSmith.
 
     Automatically finds and fetches the latest root trace without needing to manually
@@ -278,7 +292,7 @@ def latest(project_uuid, format_type, last_n_minutes, since):
         )
 
         # Output
-        formatters.print_formatted(messages, format_type)
+        formatters.print_formatted(messages, format_type, output_file)
 
     except ValueError as e:
         # Handle "No traces found" case
