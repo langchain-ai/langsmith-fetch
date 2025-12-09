@@ -172,13 +172,33 @@ $ langsmith-fetch trace 3b0b15fe-1e3a-4aef-afa8-48df15879cfe --format json
 ]
 ```
 
-## Development
+## Tests
 
-Run directly with Python module syntax:
+Run the test suite:
 
 ```bash
-python -m langsmith_cli thread test-email-agent-thread
+# Install with test dependencies
+pip install -e ".[test]"
+
+# Or with uv
+uv sync --extra test
+
+# Run all tests
+pytest tests/
+
+# Run with verbose output
+pytest tests/ -v
+
+# Run with coverage
+pytest tests/ --cov=langsmith_cli
 ```
+
+The test suite includes 34 tests covering:
+- All CLI commands (trace, thread, config)
+- All output formats (pretty, json, raw)
+- Config management and storage
+- API fetching and error handling
+- Edge cases and validation
 
 ## License
 
