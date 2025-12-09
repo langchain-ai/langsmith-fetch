@@ -23,9 +23,34 @@ test = [
     "pytest-mock>=3.12",
     "responses>=0.24",
 ]
+dev = [
+    "ruff>=0.1.0",
+]
 
 [project.scripts]
 langsmith-fetch = "langsmith_cli.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/langsmith_cli"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by formatter)
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

@@ -1,12 +1,14 @@
 """Core fetching logic for LangSmith threads and traces."""
 
 import json
-import requests
-from typing import List, Dict, Any, Optional, Tuple
 from collections import OrderedDict
+from typing import Any
+
+import requests
 
 try:
-    from langsmith import Client
+    from langsmith import Client  # noqa: F401
+
     HAS_LANGSMITH = True
 except ImportError:
     HAS_LANGSMITH = False
@@ -14,7 +16,7 @@ except ImportError:
 
 def fetch_thread(
     thread_id: str, project_uuid: str, *, base_url: str, api_key: str
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Fetch messages for a LangGraph thread by thread_id.
 
@@ -50,7 +52,7 @@ def fetch_thread(
     return messages
 
 
-def fetch_trace(trace_id: str, *, base_url: str, api_key: str) -> List[Dict[str, Any]]:
+def fetch_trace(trace_id: str, *, base_url: str, api_key: str) -> list[dict[str, Any]]:
     """
     Fetch messages for a single trace by trace ID.
 
@@ -81,11 +83,8 @@ def fetch_trace(trace_id: str, *, base_url: str, api_key: str) -> List[Dict[str,
 
 
 def fetch_recent_threads(
-    project_uuid: str,
-    base_url: str,
-    api_key: str,
-    limit: int = 10
-) -> List[Tuple[str, List[Dict[str, Any]]]]:
+    project_uuid: str, base_url: str, api_key: str, limit: int = 10
+) -> list[tuple[str, list[dict[str, Any]]]]:
     """
     Fetch recent threads for a project.
 
@@ -101,24 +100,18 @@ def fetch_recent_threads(
     Raises:
         requests.HTTPError: If the API request fails
     """
-    headers = {
-        "X-API-Key": api_key,
-        "Content-Type": "application/json"
-    }
+    headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
 
     # Query for root runs in the project
     url = f"{base_url}/runs/query"
-    body = {
-        "session": [project_uuid],
-        "is_root": True
-    }
+    body = {"session": [project_uuid], "is_root": True}
 
     response = requests.post(url, headers=headers, data=json.dumps(body))
 
     # Add better error handling
     try:
         response.raise_for_status()
-    except requests.HTTPError as e:
+    except requests.HTTPError:
         # Print response content for debugging
         print(f"API Error Response ({response.status_code}): {response.text}")
         print(f"Request body was: {json.dumps(body, indent=2)}")
@@ -127,19 +120,19 @@ def fetch_recent_threads(
     data = response.json()
 
     # The response should have a 'runs' key
-    runs = data.get('runs', [])
+    runs = data.get("runs", [])
 
     # Extract unique thread_ids with their most recent timestamp
     thread_info = OrderedDict()  # Maintains insertion order (most recent first)
 
     for run in runs:
         # Check if run has thread_id in metadata
-        extra = run.get('extra', {})
-        metadata = extra.get('metadata', {})
-        thread_id = metadata.get('thread_id')
+        extra = run.get("extra", {})
+        metadata = extra.get("metadata", {})
+        thread_id = metadata.get("thread_id")
 
         if thread_id and thread_id not in thread_info:
-            thread_info[thread_id] = run.get('start_time')
+            thread_info[thread_id] = run.get("start_time")
 
             # Stop if we've found enough unique threads
             if len(thread_info) >= limit:
@@ -149,7 +142,9 @@ def fetch_recent_threads(
     results = []
     for thread_id in thread_info.keys():
         try:
-            messages = fetch_thread(thread_id, project_uuid, base_url=base_url, api_key=api_key)
+            messages = fetch_thread(
+                thread_id, project_uuid, base_url=base_url, api_key=api_key
+            )
             results.append((thread_id, messages))
         except Exception as e:
             # Log error but continue with other threads
@@ -162,10 +157,10 @@ def fetch_recent_threads(
 def fetch_latest_trace(
     api_key: str,
     base_url: str,
-    project_uuid: Optional[str] = None,
-    last_n_minutes: Optional[int] = None,
-    since: Optional[str] = None
-) -> List[Dict[str, Any]]:
+    project_uuid: str | None = None,
+    last_n_minutes: int | None = None,
+    since: str | None = None,
+) -> list[dict[str, Any]]:
     """
     Fetch the most recent root trace from LangSmith.
 
@@ -186,8 +181,9 @@ def fetch_latest_trace(
         ValueError: If no traces found matching criteria
         Exception: If API request fails
     """
-    from langsmith import Client
     from datetime import datetime, timedelta, timezone
+
+    from langsmith import Client
 
     # Initialize langsmith client
     client = Client(api_key=api_key)
@@ -208,7 +204,7 @@ def fetch_latest_trace(
         filter_params["start_time"] = start_time
     elif since is not None:
         # Parse ISO timestamp
-        start_time = datetime.fromisoformat(since.replace('Z', '+00:00'))
+        start_time = datetime.fromisoformat(since.replace("Z", "+00:00"))
         filter_params["start_time"] = start_time
 
     # Fetch latest run

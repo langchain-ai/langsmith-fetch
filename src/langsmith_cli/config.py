@@ -1,10 +1,10 @@
 """Configuration file management for LangSmith Fetch."""
 
 import os
-import yaml
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any
 
+import yaml
 
 CONFIG_DIR = Path.home() / ".langsmith-cli"
 CONFIG_FILE = CONFIG_DIR / "config.yaml"
@@ -15,7 +15,7 @@ def _ensure_config_dir():
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def load_config() -> Dict[str, Any]:
+def load_config() -> dict[str, Any]:
     """
     Load configuration from file.
 
@@ -25,11 +25,11 @@ def load_config() -> Dict[str, Any]:
     if not CONFIG_FILE.exists():
         return {}
 
-    with open(CONFIG_FILE, "r") as f:
+    with open(CONFIG_FILE) as f:
         return yaml.safe_load(f) or {}
 
 
-def save_config(config: Dict[str, Any]):
+def save_config(config: dict[str, Any]):
     """
     Save configuration to file.
 
@@ -42,7 +42,7 @@ def save_config(config: Dict[str, Any]):
         yaml.dump(config, f, default_flow_style=False)
 
 
-def get_config_value(key: str) -> Optional[str]:
+def get_config_value(key: str) -> str | None:
     """
     Get a configuration value by key.
 
@@ -75,7 +75,7 @@ def set_config_value(key: str, value: str):
     save_config(config)
 
 
-def get_api_key() -> Optional[str]:
+def get_api_key() -> str | None:
     """
     Get API key from config or environment variable.
 
@@ -91,7 +91,7 @@ def get_api_key() -> Optional[str]:
     return os.environ.get("LANGSMITH_API_KEY")
 
 
-def get_base_url() -> Optional[str]:
+def get_base_url() -> str | None:
     """
     Get base URL from config.
 
@@ -103,7 +103,7 @@ def get_base_url() -> Optional[str]:
     return os.environ.get("LANGSMITH_ENDPOINT") or "https://api.smith.langchain.com"
 
 
-def get_project_uuid() -> Optional[str]:
+def get_project_uuid() -> str | None:
     """
     Get project UUID from config.
 
