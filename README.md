@@ -42,6 +42,22 @@ langsmith-fetch config set project-uuid <your-project-uuid>
 langsmith-fetch thread test-email-agent-thread
 ```
 
+### Output Formats
+
+LangSmith Fetch supports three output formats for different use cases:
+
+- **`pretty`**: Human-readable Rich panels with color and formatting (default)
+  - Best for: Terminal viewing, debugging, manual inspection
+  - Example: `langsmith-fetch trace <id>` or `langsmith-fetch trace <id> --format pretty`
+
+- **`json`**: Pretty-printed JSON with syntax highlighting
+  - Best for: Reading structured data, copying to other tools
+  - Example: `langsmith-fetch trace <id> --format json`
+
+- **`raw`**: Compact single-line JSON for piping
+  - Best for: Shell pipelines, automated processing, scripts
+  - Example: `langsmith-fetch trace <id> --format raw | jq '.[] | select(.role=="user")'`
+
 ## Features
 
 ### Understanding LangSmith Data Organization
@@ -109,10 +125,6 @@ langsmith-fetch thread test-email-agent-thread --format json
 langsmith-fetch thread test-email-agent-thread --format pretty
 langsmith-fetch thread test-email-agent-thread --format raw
 ```
-
-- **raw**: Compact JSON (single line)
-- **json**: Pretty-printed JSON with syntax highlighting
-- **pretty**: Human-readable formatted text with Rich panels
 
 ### Fetch Trace by UUID
 
