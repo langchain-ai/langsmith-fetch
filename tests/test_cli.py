@@ -4,10 +4,10 @@ import pytest
 import json
 from click.testing import CliRunner
 import responses
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from langsmith_cli.cli import main
-from tests.conftest import TEST_TRACE_ID, TEST_THREAD_ID, TEST_PROJECT_UUID, TEST_API_KEY
+from tests.conftest import TEST_TRACE_ID, TEST_THREAD_ID, TEST_PROJECT_UUID, TEST_API_KEY, TEST_BASE_URL
 
 
 class TestTraceCommand:
@@ -246,122 +246,232 @@ class TestThreadCommand:
                 assert "LANGSMITH_API_KEY not found" in result.output
 
 
-class TestThreadsCommand:
-    """Tests for threads command."""
+class TestLatestCommand:
+    """Tests for latest command."""
 
     @responses.activate
-    def test_threads_default_limit(self, sample_thread_response, mock_env_api_key, temp_config_dir, tmp_path):
-        """Test threads command with default limit."""
+    @patch('langsmith.Client')
+    def test_latest_default_format(self, mock_client_class, sample_trace_response, mock_env_api_key):
+        """Test latest command with default (pretty) format."""
+        # Mock the langsmith Client
+        mock_client = Mock()
+        mock_run = Mock()
+        mock_run.id = TEST_TRACE_ID
+        mock_client.list_runs.return_value = [mock_run]
+        mock_client_class.return_value = mock_client
+
+        # Mock the REST API call for fetch_trace
+        responses.add(
+            responses.GET,
+            f"https://api.smith.langchain.com/runs/{TEST_TRACE_ID}",
+            json=sample_trace_response,
+            status=200
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ['latest'])
+
+        assert result.exit_code == 0
+        assert "Message 1:" in result.output
+
+    @responses.activate
+    @patch('langsmith.Client')
+    def test_latest_with_project_uuid(self, mock_client_class, sample_trace_response, mock_env_api_key):
+        """Test latest command with project UUID filter."""
+        # Mock the langsmith Client
+        mock_client = Mock()
+        mock_run = Mock()
+        mock_run.id = TEST_TRACE_ID
+        mock_client.list_runs.return_value = [mock_run]
+        mock_client_class.return_value = mock_client
+
+        # Mock the REST API call
+        responses.add(
+            responses.GET,
+            f"https://api.smith.langchain.com/runs/{TEST_TRACE_ID}",
+            json=sample_trace_response,
+            status=200
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ['latest', '--project-uuid', TEST_PROJECT_UUID])
+
+        assert result.exit_code == 0
+        # Verify the Client.list_runs was called with project_id
+        call_kwargs = mock_client.list_runs.call_args[1]
+        assert call_kwargs['project_id'] == TEST_PROJECT_UUID
+
+    @responses.activate
+    @patch('langsmith.Client')
+    def test_latest_json_format(self, mock_client_class, sample_trace_response, mock_env_api_key):
+        """Test latest command with json format."""
+        # Mock the langsmith Client
+        mock_client = Mock()
+        mock_run = Mock()
+        mock_run.id = TEST_TRACE_ID
+        mock_client.list_runs.return_value = [mock_run]
+        mock_client_class.return_value = mock_client
+
+        # Mock the REST API call
+        responses.add(
+            responses.GET,
+            f"https://api.smith.langchain.com/runs/{TEST_TRACE_ID}",
+            json=sample_trace_response,
+            status=200
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ['latest', '--format', 'json'])
+
+        assert result.exit_code == 0
+        assert '\"type\": \"human\"' in result.output or '\"type\": \"user\"' in result.output
+
+    @responses.activate
+    @patch('langsmith.Client')
+    def test_latest_raw_format(self, mock_client_class, sample_trace_response, mock_env_api_key):
+        """Test latest command with raw format."""
+        # Mock the langsmith Client
+        mock_client = Mock()
+        mock_run = Mock()
+        mock_run.id = TEST_TRACE_ID
+        mock_client.list_runs.return_value = [mock_run]
+        mock_client_class.return_value = mock_client
+
+        # Mock the REST API call
+        responses.add(
+            responses.GET,
+            f"https://api.smith.langchain.com/runs/{TEST_TRACE_ID}",
+            json=sample_trace_response,
+            status=200
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ['latest', '--format', 'raw'])
+
+        assert result.exit_code == 0
+        assert '[' in result.output
+        assert ']' in result.output
+
+    @responses.activate
+    @patch('langsmith.Client')
+    def test_latest_with_time_window(self, mock_client_class, sample_trace_response, mock_env_api_key):
+        """Test latest command with --last-n-minutes flag."""
+        # Mock the langsmith Client
+        mock_client = Mock()
+        mock_run = Mock()
+        mock_run.id = TEST_TRACE_ID
+        mock_client.list_runs.return_value = [mock_run]
+        mock_client_class.return_value = mock_client
+
+        # Mock the REST API call
+        responses.add(
+            responses.GET,
+            f"https://api.smith.langchain.com/runs/{TEST_TRACE_ID}",
+            json=sample_trace_response,
+            status=200
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ['latest', '--last-n-minutes', '30'])
+
+        assert result.exit_code == 0
+        # Verify the Client.list_runs was called with start_time
+        call_kwargs = mock_client.list_runs.call_args[1]
+        assert 'start_time' in call_kwargs
+
+    @responses.activate
+    @patch('langsmith.Client')
+    def test_latest_with_since_timestamp(self, mock_client_class, sample_trace_response, mock_env_api_key):
+        """Test latest command with --since flag."""
+        # Mock the langsmith Client
+        mock_client = Mock()
+        mock_run = Mock()
+        mock_run.id = TEST_TRACE_ID
+        mock_client.list_runs.return_value = [mock_run]
+        mock_client_class.return_value = mock_client
+
+        # Mock the REST API call
+        responses.add(
+            responses.GET,
+            f"https://api.smith.langchain.com/runs/{TEST_TRACE_ID}",
+            json=sample_trace_response,
+            status=200
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ['latest', '--since', '2025-12-09T10:00:00Z'])
+
+        assert result.exit_code == 0
+        # Verify the Client.list_runs was called with start_time
+        call_kwargs = mock_client.list_runs.call_args[1]
+        assert 'start_time' in call_kwargs
+
+    @patch('langsmith.Client')
+    def test_latest_mutually_exclusive_time_filters(self, mock_client_class, mock_env_api_key):
+        """Test that --last-n-minutes and --since are mutually exclusive."""
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            'latest',
+            '--last-n-minutes', '30',
+            '--since', '2025-12-09T10:00:00Z'
+        ])
+
+        assert result.exit_code == 1
+        assert "mutually exclusive" in result.output
+
+    @patch('langsmith.Client')
+    def test_latest_no_traces_found(self, mock_client_class, mock_env_api_key):
+        """Test latest command when no traces are found."""
+        # Mock empty list_runs result
+        mock_client = Mock()
+        mock_client.list_runs.return_value = []
+        mock_client_class.return_value = mock_client
+
+        runner = CliRunner()
+        result = runner.invoke(main, ['latest'])
+
+        assert result.exit_code == 1
+        assert "No traces found" in result.output
+
+    def test_latest_no_api_key(self, monkeypatch):
+        """Test latest command fails without API key."""
+        monkeypatch.delenv('LANGSMITH_API_KEY', raising=False)
+
+        runner = CliRunner()
+        result = runner.invoke(main, ['latest'])
+
+        assert result.exit_code == 1
+        assert "LANGSMITH_API_KEY not found" in result.output
+
+    @responses.activate
+    @patch('langsmith.Client')
+    def test_latest_with_config_project_uuid(self, mock_client_class, sample_trace_response,
+                                              mock_env_api_key, temp_config_dir):
+        """Test latest command uses project UUID from config if not provided."""
         with patch('langsmith_cli.config.CONFIG_DIR', temp_config_dir):
             with patch('langsmith_cli.config.CONFIG_FILE', temp_config_dir / 'config.yaml'):
                 from langsmith_cli.config import set_config_value
                 set_config_value('project-uuid', TEST_PROJECT_UUID)
 
-                # Mock the runs query endpoint
-                responses.add(
-                    responses.POST,
-                    "https://api.smith.langchain.com/runs/query",
-                    json={
-                        "runs": [
-                            {
-                                "id": "run-1",
-                                "start_time": "2024-01-01T00:00:00Z",
-                                "extra": {
-                                    "metadata": {
-                                        "thread_id": "thread-1"
-                                    }
-                                }
-                            },
-                            {
-                                "id": "run-2",
-                                "start_time": "2024-01-02T00:00:00Z",
-                                "extra": {
-                                    "metadata": {
-                                        "thread_id": "thread-2"
-                                    }
-                                }
-                            }
-                        ]
-                    },
-                    status=200
-                )
+                # Mock the langsmith Client
+                mock_client = Mock()
+                mock_run = Mock()
+                mock_run.id = TEST_TRACE_ID
+                mock_client.list_runs.return_value = [mock_run]
+                mock_client_class.return_value = mock_client
 
-                # Mock the thread fetch endpoints
+                # Mock the REST API call
                 responses.add(
                     responses.GET,
-                    "https://api.smith.langchain.com/runs/threads/thread-1",
-                    json=sample_thread_response,
-                    status=200
-                )
-                responses.add(
-                    responses.GET,
-                    "https://api.smith.langchain.com/runs/threads/thread-2",
-                    json=sample_thread_response,
+                    f"https://api.smith.langchain.com/runs/{TEST_TRACE_ID}",
+                    json=sample_trace_response,
                     status=200
                 )
 
                 runner = CliRunner()
-                output_dir = tmp_path / "threads"
-                result = runner.invoke(main, ['threads', str(output_dir)])
+                result = runner.invoke(main, ['latest'])
 
                 assert result.exit_code == 0
-                assert "Found 2 thread(s)" in result.output
-                assert "Successfully saved 2 thread(s)" in result.output
-                
-                # Check that files were created
-                assert (output_dir / "thread-1.json").exists()
-                assert (output_dir / "thread-2.json").exists()
-
-    @responses.activate
-    def test_threads_custom_limit(self, sample_thread_response, mock_env_api_key, temp_config_dir, tmp_path):
-        """Test threads command with custom limit."""
-        with patch('langsmith_cli.config.CONFIG_DIR', temp_config_dir):
-            with patch('langsmith_cli.config.CONFIG_FILE', temp_config_dir / 'config.yaml'):
-                from langsmith_cli.config import set_config_value
-                set_config_value('project-uuid', TEST_PROJECT_UUID)
-
-                # Mock the runs query endpoint
-                responses.add(
-                    responses.POST,
-                    "https://api.smith.langchain.com/runs/query",
-                    json={
-                        "runs": [
-                            {
-                                "id": "run-1",
-                                "start_time": "2024-01-01T00:00:00Z",
-                                "extra": {
-                                    "metadata": {
-                                        "thread_id": "thread-1"
-                                    }
-                                }
-                            }
-                        ]
-                    },
-                    status=200
-                )
-
-                # Mock the thread fetch endpoint
-                responses.add(
-                    responses.GET,
-                    "https://api.smith.langchain.com/runs/threads/thread-1",
-                    json=sample_thread_response,
-                    status=200
-                )
-
-                runner = CliRunner()
-                output_dir = tmp_path / "threads"
-                result = runner.invoke(main, ['threads', str(output_dir), '--limit', '5'])
-
-                assert result.exit_code == 0
-                assert "thread-1" in result.output
-
-    def test_threads_no_project_uuid(self, mock_env_api_key, temp_config_dir, tmp_path):
-        """Test threads command fails without project UUID."""
-        with patch('langsmith_cli.config.CONFIG_DIR', temp_config_dir):
-            with patch('langsmith_cli.config.CONFIG_FILE', temp_config_dir / 'config.yaml'):
-                runner = CliRunner()
-                output_dir = tmp_path / "threads"
-                result = runner.invoke(main, ['threads', str(output_dir)])
-
-                assert result.exit_code == 1
-                assert "project-uuid required" in result.output
+                # Verify the Client.list_runs was called with project_id from config
+                call_kwargs = mock_client.list_runs.call_args[1]
+                assert call_kwargs['project_id'] == TEST_PROJECT_UUID

@@ -19,6 +19,7 @@ def main():
       - Project UUID (required for thread fetching only)
 
     COMMON COMMANDS:
+      langsmith-fetch latest                              # Fetch most recent trace
       langsmith-fetch trace <trace-id>                    # Fetch a single trace
       langsmith-fetch thread <thread-id>                  # Fetch all traces in a thread
       langsmith-fetch threads <output-dir> --limit 10     # Fetch recent threads and save to files
@@ -34,12 +35,25 @@ def main():
 
 
 @main.command()
-@click.argument('thread_id', metavar='THREAD_ID')
-@click.option('--project-uuid', metavar='UUID',
-              help='LangSmith project UUID (overrides config). Find in UI or via trace session_id.')
-@click.option('--format', 'format_type', type=click.Choice(['raw', 'json', 'pretty']),
-              help='Output format: raw (compact JSON), json (pretty JSON), pretty (human-readable panels)')
-def thread(thread_id, project_uuid, format_type):
+@click.argument("thread_id", metavar="THREAD_ID")
+@click.option(
+    "--project-uuid",
+    metavar="UUID",
+    help="LangSmith project UUID (overrides config). Find in UI or via trace session_id.",
+)
+@click.option(
+    "--format",
+    "format_type",
+    type=click.Choice(["raw", "json", "pretty"]),
+    help="Output format: raw (compact JSON), json (pretty JSON), pretty (human-readable panels)",
+)
+@click.option(
+    "--file",
+    "output_file",
+    metavar="PATH",
+    help="Save output to file instead of printing to stdout",
+)
+def thread(thread_id, project_uuid, format_type, output_file):
     """Fetch messages for a LangGraph thread by thread_id.
 
     A thread represents a conversation or session containing multiple traces. Each
@@ -81,9 +95,12 @@ def thread(thread_id, project_uuid, format_type):
     """
 
     # Get API key
+    base_url = config.get_base_url()
     api_key = config.get_api_key()
     if not api_key:
-        click.echo("Error: LANGSMITH_API_KEY not found in environment or config", err=True)
+        click.echo(
+            "Error: LANGSMITH_API_KEY not found in environment or config", err=True
+        )
         sys.exit(1)
 
     # Get project UUID (from option or config)
@@ -91,7 +108,10 @@ def thread(thread_id, project_uuid, format_type):
         project_uuid = config.get_project_uuid()
 
     if not project_uuid:
-        click.echo("Error: project-uuid required. Set with: langsmith-fetch config set project-uuid <uuid>", err=True)
+        click.echo(
+            "Error: project-uuid required. Set with: langsmith-fetch config set project-uuid <uuid>",
+            err=True,
+        )
         sys.exit(1)
 
     # Get format (from option or config)
@@ -100,10 +120,12 @@ def thread(thread_id, project_uuid, format_type):
 
     try:
         # Fetch messages
-        messages = fetchers.fetch_thread(thread_id, project_uuid, api_key)
+        messages = fetchers.fetch_thread(
+            thread_id, project_uuid, base_url=base_url, api_key=api_key
+        )
 
         # Output
-        formatters.print_formatted(messages, format_type)
+        formatters.print_formatted(messages, format_type, output_file)
 
     except Exception as e:
         click.echo(f"Error fetching thread: {e}", err=True)
@@ -111,10 +133,20 @@ def thread(thread_id, project_uuid, format_type):
 
 
 @main.command()
-@click.argument('trace_id', metavar='TRACE_ID')
-@click.option('--format', 'format_type', type=click.Choice(['raw', 'json', 'pretty']),
-              help='Output format: raw (compact JSON), json (pretty JSON), pretty (human-readable panels)')
-def trace(trace_id, format_type):
+@click.argument("trace_id", metavar="TRACE_ID")
+@click.option(
+    "--format",
+    "format_type",
+    type=click.Choice(["raw", "json", "pretty"]),
+    help="Output format: raw (compact JSON), json (pretty JSON), pretty (human-readable panels)",
+)
+@click.option(
+    "--file",
+    "output_file",
+    metavar="PATH",
+    help="Save output to file instead of printing to stdout",
+)
+def trace(trace_id, format_type, output_file):
     """Fetch messages for a single trace by trace ID.
 
     A trace represents a single execution path containing multiple runs (LLM calls,
@@ -146,9 +178,12 @@ def trace(trace_id, format_type):
     """
 
     # Get API key
+    base_url = config.get_base_url()
     api_key = config.get_api_key()
     if not api_key:
-        click.echo("Error: LANGSMITH_API_KEY not found in environment or config", err=True)
+        click.echo(
+            "Error: LANGSMITH_API_KEY not found in environment or config", err=True
+        )
         sys.exit(1)
 
     # Get format (from option or config)
@@ -157,10 +192,10 @@ def trace(trace_id, format_type):
 
     try:
         # Fetch messages
-        messages = fetchers.fetch_trace(trace_id, api_key)
+        messages = fetchers.fetch_trace(trace_id, base_url=base_url, api_key=api_key)
 
         # Output
-        formatters.print_formatted(messages, format_type)
+        formatters.print_formatted(messages, format_type, output_file)
 
     except Exception as e:
         click.echo(f"Error fetching trace: {e}", err=True)
@@ -208,7 +243,8 @@ def threads(output_dir, project_uuid, limit):
         or provided with --project-uuid option
     """
 
-    # Get API key
+    # Get API key and base URL
+    base_url = config.get_base_url()
     api_key = config.get_api_key()
     if not api_key:
         click.echo("Error: LANGSMITH_API_KEY not found in environment or config", err=True)
@@ -228,9 +264,9 @@ def threads(output_dir, project_uuid, limit):
 
     try:
         click.echo(f"Fetching up to {limit} recent threads from project {project_uuid}...")
-        
+
         # Fetch recent threads
-        threads_data = fetchers.fetch_recent_threads(project_uuid, api_key, limit)
+        threads_data = fetchers.fetch_recent_threads(project_uuid, base_url, api_key, limit)
 
         if not threads_data:
             click.echo("No threads found in project.", err=True)
@@ -249,6 +285,114 @@ def threads(output_dir, project_uuid, limit):
 
     except Exception as e:
         click.echo(f"Error fetching threads: {e}", err=True)
+        sys.exit(1)
+
+
+@main.command()
+@click.option('--project-uuid', metavar='UUID',
+              help='LangSmith project UUID to filter traces (optional, searches all projects if not provided)')
+@click.option('--format', 'format_type', type=click.Choice(['raw', 'json', 'pretty']),
+              help='Output format: raw (compact JSON), json (pretty JSON), pretty (human-readable panels)')
+@click.option('--last-n-minutes', type=int, metavar='N',
+              help='Only search traces from the last N minutes')
+@click.option('--since', metavar='TIMESTAMP',
+              help='Only search traces since ISO timestamp (e.g., 2025-12-09T10:00:00Z)')
+@click.option('--file', 'output_file', metavar='PATH',
+              help='Save output to file instead of printing to stdout')
+def latest(project_uuid, format_type, last_n_minutes, since, output_file):
+    """Fetch the most recent trace from LangSmith.
+
+    Automatically finds and fetches the latest root trace without needing to manually
+    copy trace IDs from the UI. Perfect for the workflow: "I just did a thing and I
+    want the CLI to just grab the trace."
+
+    \b
+    RETURNS:
+      List of messages from the most recent trace, ordered chronologically.
+
+    \b
+    EXAMPLES:
+      # Fetch most recent trace across all projects
+      langsmith-fetch latest
+
+      # Fetch most recent trace from a specific project
+      langsmith-fetch latest --project-uuid 80f1ecb3-a16b-411e-97ae-1c89adbb5c49
+
+      # Fetch most recent trace from last 30 minutes
+      langsmith-fetch latest --last-n-minutes 30
+
+      # Fetch most recent trace since a specific time
+      langsmith-fetch latest --since 2025-12-09T10:00:00Z
+
+      # Fetch with JSON output format
+      langsmith-fetch latest --format json
+
+      # Save to file
+      langsmith-fetch latest --file latest.json --format raw
+
+    \b
+    PREREQUISITES:
+      - LANGSMITH_API_KEY environment variable must be set, or
+      - API key stored via: langsmith-fetch config set api-key <key>
+
+    \b
+    OPTIONS:
+      --project-uuid      Optional filter to search only within a specific project.
+                          If not provided, searches across all projects.
+
+      --last-n-minutes    Optional time window to limit search (mutually exclusive with --since)
+
+      --since             Optional ISO timestamp to limit search (mutually exclusive with --last-n-minutes)
+
+      --format            Output format (raw, json, or pretty)
+
+    \b
+    NOTES:
+      - This command fetches the most recent TRACE only
+      - Thread support via SDK is not yet available but will be added in a future release
+      - The command searches for root traces only (not child runs)
+    """
+
+    # Validate mutually exclusive time filters
+    if last_n_minutes is not None and since is not None:
+        click.echo("Error: --last-n-minutes and --since are mutually exclusive", err=True)
+        sys.exit(1)
+
+    # Get API key and base URL
+    base_url = config.get_base_url()
+    api_key = config.get_api_key()
+    if not api_key:
+        click.echo("Error: LANGSMITH_API_KEY not found in environment or config", err=True)
+        sys.exit(1)
+
+    # Get project UUID (from option or config, but it's optional)
+    if not project_uuid:
+        project_uuid = config.get_project_uuid()
+    # Note: project_uuid can be None, which means search all projects
+
+    # Get format (from option or config)
+    if not format_type:
+        format_type = config.get_default_format()
+
+    try:
+        # Fetch latest trace
+        messages = fetchers.fetch_latest_trace(
+            api_key=api_key,
+            base_url=base_url,
+            project_uuid=project_uuid,
+            last_n_minutes=last_n_minutes,
+            since=since
+        )
+
+        # Output
+        formatters.print_formatted(messages, format_type, output_file)
+
+    except ValueError as e:
+        # Handle "No traces found" case
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"Error fetching latest trace: {e}", err=True)
         sys.exit(1)
 
 
@@ -275,9 +419,9 @@ def config_cmd():
     pass
 
 
-@config_cmd.command('set')
-@click.argument('key', metavar='KEY')
-@click.argument('value', metavar='VALUE')
+@config_cmd.command("set")
+@click.argument("key", metavar="KEY")
+@click.argument("value", metavar="VALUE")
 def config_set(key, value):
     """Set a configuration value.
 
@@ -300,7 +444,7 @@ def config_set(key, value):
         sys.exit(1)
 
 
-@config_cmd.command('show')
+@config_cmd.command("show")
 def config_show():
     """Show current configuration.
 
@@ -336,8 +480,8 @@ def config_show():
 
 
 # Register config subcommands under main CLI
-main.add_command(config_cmd, name='config')
+main.add_command(config_cmd, name="config")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
