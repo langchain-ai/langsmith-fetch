@@ -313,3 +313,185 @@ class TestFetchLatestTrace:
         assert call_kwargs['limit'] == 1
 
         assert isinstance(messages, list)
+
+
+class TestFetchRecentThreads:
+    """Tests for fetch_recent_threads function."""
+
+    @responses.activate
+    def test_fetch_recent_threads_success(self, sample_thread_response):
+        """Test successful recent threads fetching."""
+        # Mock runs query
+        responses.add(
+            responses.POST,
+            f"{TEST_BASE_URL}/runs/query",
+            json={
+                "runs": [
+                    {
+                        "id": "run-1",
+                        "start_time": "2024-01-02T00:00:00Z",
+                        "extra": {
+                            "metadata": {
+                                "thread_id": "thread-1"
+                            }
+                        }
+                    },
+                    {
+                        "id": "run-2",
+                        "start_time": "2024-01-01T00:00:00Z",
+                        "extra": {
+                            "metadata": {
+                                "thread_id": "thread-2"
+                            }
+                        }
+                    }
+                ]
+            },
+            status=200
+        )
+
+        # Mock thread fetches
+        responses.add(
+            responses.GET,
+            f"{TEST_BASE_URL}/runs/threads/thread-1",
+            json=sample_thread_response,
+            status=200
+        )
+        responses.add(
+            responses.GET,
+            f"{TEST_BASE_URL}/runs/threads/thread-2",
+            json=sample_thread_response,
+            status=200
+        )
+
+        results = fetchers.fetch_recent_threads(
+            TEST_PROJECT_UUID, TEST_BASE_URL, TEST_API_KEY, limit=10
+        )
+
+        assert isinstance(results, list)
+        assert len(results) == 2
+        assert results[0][0] == "thread-1"
+        assert results[1][0] == "thread-2"
+        assert len(results[0][1]) == 3  # 3 messages per thread
+        assert len(results[1][1]) == 3
+
+    @responses.activate
+    def test_fetch_recent_threads_respects_limit(self, sample_thread_response):
+        """Test that fetch_recent_threads respects the limit parameter."""
+        # Mock runs query with 3 threads
+        responses.add(
+            responses.POST,
+            f"{TEST_BASE_URL}/runs/query",
+            json={
+                "runs": [
+                    {
+                        "id": "run-1",
+                        "start_time": "2024-01-03T00:00:00Z",
+                        "extra": {"metadata": {"thread_id": "thread-1"}}
+                    },
+                    {
+                        "id": "run-2",
+                        "start_time": "2024-01-02T00:00:00Z",
+                        "extra": {"metadata": {"thread_id": "thread-2"}}
+                    },
+                    {
+                        "id": "run-3",
+                        "start_time": "2024-01-01T00:00:00Z",
+                        "extra": {"metadata": {"thread_id": "thread-3"}}
+                    }
+                ]
+            },
+            status=200
+        )
+
+        # Mock only 2 thread fetches (because limit=2)
+        for i in [1, 2]:
+            responses.add(
+                responses.GET,
+                f"{TEST_BASE_URL}/runs/threads/thread-{i}",
+                json=sample_thread_response,
+                status=200
+            )
+
+        results = fetchers.fetch_recent_threads(
+            TEST_PROJECT_UUID, TEST_BASE_URL, TEST_API_KEY, limit=2
+        )
+
+        assert len(results) == 2
+        assert results[0][0] == "thread-1"
+        assert results[1][0] == "thread-2"
+
+    @responses.activate
+    def test_fetch_recent_threads_handles_missing_thread_id(self, sample_thread_response):
+        """Test that runs without thread_id are skipped."""
+        responses.add(
+            responses.POST,
+            f"{TEST_BASE_URL}/runs/query",
+            json={
+                "runs": [
+                    {
+                        "id": "run-1",
+                        "start_time": "2024-01-02T00:00:00Z",
+                        "extra": {"metadata": {"thread_id": "thread-1"}}
+                    },
+                    {
+                        "id": "run-2",
+                        "start_time": "2024-01-01T00:00:00Z",
+                        "extra": {"metadata": {}}  # No thread_id
+                    }
+                ]
+            },
+            status=200
+        )
+
+        responses.add(
+            responses.GET,
+            f"{TEST_BASE_URL}/runs/threads/thread-1",
+            json=sample_thread_response,
+            status=200
+        )
+
+        results = fetchers.fetch_recent_threads(
+            TEST_PROJECT_UUID, TEST_BASE_URL, TEST_API_KEY, limit=10
+        )
+
+        assert len(results) == 1
+        assert results[0][0] == "thread-1"
+
+    @responses.activate
+    def test_fetch_recent_threads_deduplicates(self, sample_thread_response):
+        """Test that duplicate thread_ids are deduplicated."""
+        responses.add(
+            responses.POST,
+            f"{TEST_BASE_URL}/runs/query",
+            json={
+                "runs": [
+                    {
+                        "id": "run-1",
+                        "start_time": "2024-01-02T00:00:00Z",
+                        "extra": {"metadata": {"thread_id": "thread-1"}}
+                    },
+                    {
+                        "id": "run-2",
+                        "start_time": "2024-01-01T00:00:00Z",
+                        "extra": {"metadata": {"thread_id": "thread-1"}}  # Duplicate
+                    }
+                ]
+            },
+            status=200
+        )
+
+        responses.add(
+            responses.GET,
+            f"{TEST_BASE_URL}/runs/threads/thread-1",
+            json=sample_thread_response,
+            status=200
+        )
+
+        results = fetchers.fetch_recent_threads(
+            TEST_PROJECT_UUID, TEST_BASE_URL, TEST_API_KEY, limit=10
+        )
+
+        # Should only have one result even though thread-1 appeared twice
+        assert len(results) == 1
+        assert results[0][0] == "thread-1"

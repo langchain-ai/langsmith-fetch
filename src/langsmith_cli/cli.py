@@ -2,6 +2,9 @@
 
 import click
 import sys
+import json
+import os
+from pathlib import Path
 from . import config, fetchers, formatters
 
 
@@ -19,6 +22,7 @@ def main():
       langsmith-fetch latest                              # Fetch most recent trace
       langsmith-fetch trace <trace-id>                    # Fetch a single trace
       langsmith-fetch thread <thread-id>                  # Fetch all traces in a thread
+      langsmith-fetch threads <output-dir> --limit 10     # Fetch recent threads and save to files
       langsmith-fetch config set project-uuid <uuid>      # Configure project UUID
       langsmith-fetch config set api-key <key>            # Store API key in config
 
@@ -199,6 +203,92 @@ def trace(trace_id, format_type, output_file):
 
 
 @main.command()
+@click.argument('output_dir', type=click.Path(), metavar='OUTPUT_DIR')
+@click.option('--project-uuid', metavar='UUID',
+              help='LangSmith project UUID (overrides config). Find in UI or via trace session_id.')
+@click.option('--limit', '-n', type=int, default=10,
+              help='Maximum number of threads to fetch (default: 10)')
+def threads(output_dir, project_uuid, limit):
+    """Fetch recent threads for a project and save to files.
+
+    This command fetches the N most recent threads from a LangSmith project and
+    saves each thread's messages to a separate JSON file in the specified output
+    directory.
+
+    \b
+    ARGUMENTS:
+      OUTPUT_DIR  Directory where thread files will be saved (required)
+
+    \b
+    RETURNS:
+      Creates one JSON file per thread in the output directory, named by thread_id.
+      Each file contains all messages from all traces in that thread.
+
+    \b
+    EXAMPLES:
+      # Fetch 10 most recent threads to ./my-threads directory
+      langsmith-fetch threads ./my-threads
+
+      # Fetch 25 most recent threads
+      langsmith-fetch threads ./my-threads --limit 25
+
+      # Fetch threads with explicit project UUID
+      langsmith-fetch threads ./my-threads --project-uuid 80f1ecb3-a16b-411e-97ae-1c89adbb5c49
+
+    \b
+    PREREQUISITES:
+      - LANGSMITH_API_KEY environment variable must be set, or
+        API key stored via: langsmith-fetch config set api-key <key>
+      - Project UUID must be set via: langsmith-fetch config set project-uuid <uuid>
+        or provided with --project-uuid option
+    """
+
+    # Get API key and base URL
+    base_url = config.get_base_url()
+    api_key = config.get_api_key()
+    if not api_key:
+        click.echo("Error: LANGSMITH_API_KEY not found in environment or config", err=True)
+        sys.exit(1)
+
+    # Get project UUID (from option or config)
+    if not project_uuid:
+        project_uuid = config.get_project_uuid()
+
+    if not project_uuid:
+        click.echo("Error: project-uuid required. Set with: langsmith-fetch config set project-uuid <uuid>", err=True)
+        sys.exit(1)
+
+    # Create output directory
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    try:
+        click.echo(f"Fetching up to {limit} recent threads from project {project_uuid}...")
+
+        # Fetch recent threads
+        threads_data = fetchers.fetch_recent_threads(project_uuid, base_url, api_key, limit)
+
+        if not threads_data:
+            click.echo("No threads found in project.", err=True)
+            sys.exit(1)
+
+        click.echo(f"Found {len(threads_data)} thread(s). Saving to {output_path}/")
+
+        # Save each thread to a file
+        for thread_id, messages in threads_data:
+            filename = output_path / f"{thread_id}.json"
+            with open(filename, 'w') as f:
+                json.dump(messages, f, indent=2, default=str)
+            click.echo(f"  ✓ Saved {thread_id} ({len(messages)} messages)")
+
+        click.echo(f"\n✓ Successfully saved {len(threads_data)} thread(s) to {output_path}/")
+
+    except Exception as e:
+        click.echo(f"Error fetching threads: {e}", err=True)
+        sys.exit(1)
+
+
+@main.command()
 @click.option('--project-uuid', metavar='UUID',
               help='LangSmith project UUID to filter traces (optional, searches all projects if not provided)')
 @click.option('--format', 'format_type', type=click.Choice(['raw', 'json', 'pretty']),
@@ -236,6 +326,9 @@ def latest(project_uuid, format_type, last_n_minutes, since, output_file):
 
       # Fetch with JSON output format
       langsmith-fetch latest --format json
+
+      # Save to file
+      langsmith-fetch latest --file latest.json --format raw
 
     \b
     PREREQUISITES:

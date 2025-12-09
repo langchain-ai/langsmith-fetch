@@ -2,6 +2,7 @@
 
 CLI for fetching and displaying LangSmith data with LLM friendly formatting:
 
+- Fetch recent threads from a project and save to files
 - Fetch LangGraph thread messages by thread_id
 - Fetch individual trace messages by trace ID
 - Multiple output formats: raw JSON, pretty JSON, or human-readable
@@ -41,10 +42,16 @@ Fetch a specific trace by ID:
 langsmith-fetch trace 3b0b15fe-1e3a-4aef-afa8-48df15879cfe
 ```
 
-Set your project UUID and fetch a thread:
+Set your project UUID and fetch recent threads:
 
 ```bash
 langsmith-fetch config set project-uuid <your-project-uuid>
+langsmith-fetch threads ./my-threads --limit 10
+```
+
+Or fetch a specific thread by ID:
+
+```bash
 langsmith-fetch thread test-email-agent-thread
 ```
 
@@ -140,6 +147,23 @@ langsmith-fetch config show
 Config file location: `~/.langsmith-cli/config.yaml`
 
 ## Usage
+
+### Fetch Recent Threads
+
+Fetch the most recent threads from a project and save each to a separate JSON file:
+
+```bash
+# Fetch 10 most recent threads (default) to ./my-threads directory
+langsmith-fetch threads ./my-threads
+
+# Fetch 25 most recent threads
+langsmith-fetch threads ./my-threads --limit 25
+
+# Override project UUID
+langsmith-fetch threads ./my-threads --project-uuid <uuid>
+```
+
+This creates one JSON file per thread in the specified output directory, with each file named by the thread_id.
 
 ### Fetch Thread by LangGraph thread_id
 

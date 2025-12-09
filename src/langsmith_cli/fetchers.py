@@ -2,7 +2,14 @@
 
 import json
 import requests
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
+from collections import OrderedDict
+
+try:
+    from langsmith import Client
+    HAS_LANGSMITH = True
+except ImportError:
+    HAS_LANGSMITH = False
 
 
 def fetch_thread(
@@ -71,6 +78,85 @@ def fetch_trace(trace_id: str, *, base_url: str, api_key: str) -> List[Dict[str,
     messages = data.get("messages")
     output_messages = (data.get("outputs") or {}).get("messages")
     return messages or output_messages or []
+
+
+def fetch_recent_threads(
+    project_uuid: str,
+    base_url: str,
+    api_key: str,
+    limit: int = 10
+) -> List[Tuple[str, List[Dict[str, Any]]]]:
+    """
+    Fetch recent threads for a project.
+
+    Args:
+        project_uuid: LangSmith project UUID (session_id)
+        base_url: LangSmith base URL
+        api_key: LangSmith API key
+        limit: Maximum number of threads to return (default: 10)
+
+    Returns:
+        List of tuples (thread_id, messages) for each thread
+
+    Raises:
+        requests.HTTPError: If the API request fails
+    """
+    headers = {
+        "X-API-Key": api_key,
+        "Content-Type": "application/json"
+    }
+
+    # Query for root runs in the project
+    url = f"{base_url}/runs/query"
+    body = {
+        "session": [project_uuid],
+        "is_root": True
+    }
+
+    response = requests.post(url, headers=headers, data=json.dumps(body))
+
+    # Add better error handling
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as e:
+        # Print response content for debugging
+        print(f"API Error Response ({response.status_code}): {response.text}")
+        print(f"Request body was: {json.dumps(body, indent=2)}")
+        raise
+
+    data = response.json()
+
+    # The response should have a 'runs' key
+    runs = data.get('runs', [])
+
+    # Extract unique thread_ids with their most recent timestamp
+    thread_info = OrderedDict()  # Maintains insertion order (most recent first)
+
+    for run in runs:
+        # Check if run has thread_id in metadata
+        extra = run.get('extra', {})
+        metadata = extra.get('metadata', {})
+        thread_id = metadata.get('thread_id')
+
+        if thread_id and thread_id not in thread_info:
+            thread_info[thread_id] = run.get('start_time')
+
+            # Stop if we've found enough unique threads
+            if len(thread_info) >= limit:
+                break
+
+    # Fetch messages for each thread
+    results = []
+    for thread_id in thread_info.keys():
+        try:
+            messages = fetch_thread(thread_id, project_uuid, base_url=base_url, api_key=api_key)
+            results.append((thread_id, messages))
+        except Exception as e:
+            # Log error but continue with other threads
+            print(f"Warning: Failed to fetch thread {thread_id}: {e}")
+            continue
+
+    return results
 
 
 def fetch_latest_trace(
