@@ -16,6 +16,7 @@ def main():
       - Project UUID (required for thread fetching only)
 
     COMMON COMMANDS:
+      langsmith-fetch latest                              # Fetch most recent trace
       langsmith-fetch trace <trace-id>                    # Fetch a single trace
       langsmith-fetch thread <thread-id>                  # Fetch all traces in a thread
       langsmith-fetch config set project-uuid <uuid>      # Configure project UUID
@@ -160,6 +161,107 @@ def trace(trace_id, format_type):
 
     except Exception as e:
         click.echo(f"Error fetching trace: {e}", err=True)
+        sys.exit(1)
+
+
+@main.command()
+@click.option('--project-uuid', metavar='UUID',
+              help='LangSmith project UUID to filter traces (optional, searches all projects if not provided)')
+@click.option('--format', 'format_type', type=click.Choice(['raw', 'json', 'pretty']),
+              help='Output format: raw (compact JSON), json (pretty JSON), pretty (human-readable panels)')
+@click.option('--last-n-minutes', type=int, metavar='N',
+              help='Only search traces from the last N minutes')
+@click.option('--since', metavar='TIMESTAMP',
+              help='Only search traces since ISO timestamp (e.g., 2025-12-09T10:00:00Z)')
+def latest(project_uuid, format_type, last_n_minutes, since):
+    """Fetch the most recent trace from LangSmith.
+
+    Automatically finds and fetches the latest root trace without needing to manually
+    copy trace IDs from the UI. Perfect for the workflow: "I just did a thing and I
+    want the CLI to just grab the trace."
+
+    \b
+    RETURNS:
+      List of messages from the most recent trace, ordered chronologically.
+
+    \b
+    EXAMPLES:
+      # Fetch most recent trace across all projects
+      langsmith-fetch latest
+
+      # Fetch most recent trace from a specific project
+      langsmith-fetch latest --project-uuid 80f1ecb3-a16b-411e-97ae-1c89adbb5c49
+
+      # Fetch most recent trace from last 30 minutes
+      langsmith-fetch latest --last-n-minutes 30
+
+      # Fetch most recent trace since a specific time
+      langsmith-fetch latest --since 2025-12-09T10:00:00Z
+
+      # Fetch with JSON output format
+      langsmith-fetch latest --format json
+
+    \b
+    PREREQUISITES:
+      - LANGSMITH_API_KEY environment variable must be set, or
+      - API key stored via: langsmith-fetch config set api-key <key>
+
+    \b
+    OPTIONS:
+      --project-uuid      Optional filter to search only within a specific project.
+                          If not provided, searches across all projects.
+
+      --last-n-minutes    Optional time window to limit search (mutually exclusive with --since)
+
+      --since             Optional ISO timestamp to limit search (mutually exclusive with --last-n-minutes)
+
+      --format            Output format (raw, json, or pretty)
+
+    \b
+    NOTES:
+      - This command fetches the most recent TRACE only
+      - Thread support via SDK is not yet available but will be added in a future release
+      - The command searches for root traces only (not child runs)
+    """
+
+    # Validate mutually exclusive time filters
+    if last_n_minutes is not None and since is not None:
+        click.echo("Error: --last-n-minutes and --since are mutually exclusive", err=True)
+        sys.exit(1)
+
+    # Get API key
+    api_key = config.get_api_key()
+    if not api_key:
+        click.echo("Error: LANGSMITH_API_KEY not found in environment or config", err=True)
+        sys.exit(1)
+
+    # Get project UUID (from option or config, but it's optional)
+    if not project_uuid:
+        project_uuid = config.get_project_uuid()
+    # Note: project_uuid can be None, which means search all projects
+
+    # Get format (from option or config)
+    if not format_type:
+        format_type = config.get_default_format()
+
+    try:
+        # Fetch latest trace
+        messages = fetchers.fetch_latest_trace(
+            api_key=api_key,
+            project_uuid=project_uuid,
+            last_n_minutes=last_n_minutes,
+            since=since
+        )
+
+        # Output
+        formatters.print_formatted(messages, format_type)
+
+    except ValueError as e:
+        # Handle "No traces found" case
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"Error fetching latest trace: {e}", err=True)
         sys.exit(1)
 
 

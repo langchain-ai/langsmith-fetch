@@ -3,6 +3,8 @@
 import pytest
 import responses
 import json
+from unittest.mock import Mock, patch
+from datetime import datetime, timezone
 
 from langsmith_cli import fetchers
 from tests.conftest import TEST_TRACE_ID, TEST_THREAD_ID, TEST_PROJECT_UUID, TEST_API_KEY
@@ -129,3 +131,178 @@ class TestFetchThread:
         for msg in messages:
             assert isinstance(msg, dict)
             assert 'role' in msg or 'type' in msg
+
+
+class TestFetchLatestTrace:
+    """Tests for fetch_latest_trace function."""
+
+    @responses.activate
+    @patch('langsmith.Client')
+    def test_fetch_latest_trace_success(self, mock_client_class, sample_trace_response):
+        """Test successful latest trace fetching."""
+        # Mock the Client and its list_runs method
+        mock_client = Mock()
+        mock_run = Mock()
+        mock_run.id = TEST_TRACE_ID
+        mock_client.list_runs.return_value = [mock_run]
+        mock_client_class.return_value = mock_client
+
+        # Mock the REST API call for fetch_trace
+        responses.add(
+            responses.GET,
+            f"https://api.smith.langchain.com/runs/{TEST_TRACE_ID}",
+            json=sample_trace_response,
+            status=200
+        )
+
+        messages = fetchers.fetch_latest_trace(api_key=TEST_API_KEY)
+
+        # Verify Client was instantiated with correct API key
+        mock_client_class.assert_called_once_with(api_key=TEST_API_KEY)
+
+        # Verify list_runs was called with correct parameters
+        mock_client.list_runs.assert_called_once()
+        call_kwargs = mock_client.list_runs.call_args[1]
+        assert call_kwargs['is_root'] is True
+        assert call_kwargs['limit'] == 1
+
+        # Verify the messages were fetched correctly
+        assert isinstance(messages, list)
+        assert len(messages) == 3
+
+    @patch('langsmith.Client')
+    def test_fetch_latest_trace_no_traces_found(self, mock_client_class):
+        """Test fetch_latest_trace when no traces are found."""
+        # Mock empty list_runs result
+        mock_client = Mock()
+        mock_client.list_runs.return_value = []
+        mock_client_class.return_value = mock_client
+
+        with pytest.raises(ValueError, match="No traces found matching criteria"):
+            fetchers.fetch_latest_trace(api_key=TEST_API_KEY)
+
+    @responses.activate
+    @patch('langsmith.Client')
+    def test_fetch_latest_trace_with_project_uuid(self, mock_client_class, sample_trace_response):
+        """Test latest trace fetching with project UUID filter."""
+        # Mock the Client
+        mock_client = Mock()
+        mock_run = Mock()
+        mock_run.id = TEST_TRACE_ID
+        mock_client.list_runs.return_value = [mock_run]
+        mock_client_class.return_value = mock_client
+
+        # Mock the REST API call
+        responses.add(
+            responses.GET,
+            f"https://api.smith.langchain.com/runs/{TEST_TRACE_ID}",
+            json=sample_trace_response,
+            status=200
+        )
+
+        messages = fetchers.fetch_latest_trace(
+            api_key=TEST_API_KEY,
+            project_uuid=TEST_PROJECT_UUID
+        )
+
+        # Verify list_runs was called with project_id
+        call_kwargs = mock_client.list_runs.call_args[1]
+        assert call_kwargs['project_id'] == TEST_PROJECT_UUID
+        assert call_kwargs['is_root'] is True
+        assert call_kwargs['limit'] == 1
+
+        assert isinstance(messages, list)
+
+    @responses.activate
+    @patch('langsmith.Client')
+    def test_fetch_latest_trace_with_time_window(self, mock_client_class, sample_trace_response):
+        """Test latest trace fetching with last_n_minutes filter."""
+        # Mock the Client
+        mock_client = Mock()
+        mock_run = Mock()
+        mock_run.id = TEST_TRACE_ID
+        mock_client.list_runs.return_value = [mock_run]
+        mock_client_class.return_value = mock_client
+
+        # Mock the REST API call
+        responses.add(
+            responses.GET,
+            f"https://api.smith.langchain.com/runs/{TEST_TRACE_ID}",
+            json=sample_trace_response,
+            status=200
+        )
+
+        messages = fetchers.fetch_latest_trace(
+            api_key=TEST_API_KEY,
+            last_n_minutes=30
+        )
+
+        # Verify list_runs was called with start_time
+        call_kwargs = mock_client.list_runs.call_args[1]
+        assert 'start_time' in call_kwargs
+        assert isinstance(call_kwargs['start_time'], datetime)
+        assert call_kwargs['is_root'] is True
+
+        assert isinstance(messages, list)
+
+    @responses.activate
+    @patch('langsmith.Client')
+    def test_fetch_latest_trace_with_since_timestamp(self, mock_client_class, sample_trace_response):
+        """Test latest trace fetching with since timestamp filter."""
+        # Mock the Client
+        mock_client = Mock()
+        mock_run = Mock()
+        mock_run.id = TEST_TRACE_ID
+        mock_client.list_runs.return_value = [mock_run]
+        mock_client_class.return_value = mock_client
+
+        # Mock the REST API call
+        responses.add(
+            responses.GET,
+            f"https://api.smith.langchain.com/runs/{TEST_TRACE_ID}",
+            json=sample_trace_response,
+            status=200
+        )
+
+        since_timestamp = '2025-12-09T10:00:00Z'
+        messages = fetchers.fetch_latest_trace(
+            api_key=TEST_API_KEY,
+            since=since_timestamp
+        )
+
+        # Verify list_runs was called with start_time
+        call_kwargs = mock_client.list_runs.call_args[1]
+        assert 'start_time' in call_kwargs
+        assert isinstance(call_kwargs['start_time'], datetime)
+        assert call_kwargs['is_root'] is True
+
+        assert isinstance(messages, list)
+
+    @responses.activate
+    @patch('langsmith.Client')
+    def test_fetch_latest_trace_without_project_uuid(self, mock_client_class, sample_trace_response):
+        """Test latest trace searches all projects when project_uuid is None."""
+        # Mock the Client
+        mock_client = Mock()
+        mock_run = Mock()
+        mock_run.id = TEST_TRACE_ID
+        mock_client.list_runs.return_value = [mock_run]
+        mock_client_class.return_value = mock_client
+
+        # Mock the REST API call
+        responses.add(
+            responses.GET,
+            f"https://api.smith.langchain.com/runs/{TEST_TRACE_ID}",
+            json=sample_trace_response,
+            status=200
+        )
+
+        messages = fetchers.fetch_latest_trace(api_key=TEST_API_KEY, project_uuid=None)
+
+        # Verify list_runs was called WITHOUT project_id parameter
+        call_kwargs = mock_client.list_runs.call_args[1]
+        assert 'project_id' not in call_kwargs
+        assert call_kwargs['is_root'] is True
+        assert call_kwargs['limit'] == 1
+
+        assert isinstance(messages, list)
