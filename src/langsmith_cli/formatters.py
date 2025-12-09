@@ -94,14 +94,23 @@ def _format_pretty(messages: List[Dict[str, Any]]) -> str:
     return "\n".join(output_parts)
 
 
-def print_formatted(messages: List[Dict[str, Any]], format_type: str):
+def print_formatted(messages: List[Dict[str, Any]], format_type: str, output_file: str = None):
     """
-    Print formatted messages directly to console with Rich formatting.
+    Print formatted messages directly to console with Rich formatting, or save to file.
 
     Args:
         messages: List of message dictionaries
         format_type: Output format ('raw', 'json', or 'pretty')
+        output_file: Optional file path to save output instead of printing
     """
+    # If output_file is specified, save to file
+    if output_file:
+        content = format_messages(messages, format_type)
+        with open(output_file, 'w') as f:
+            f.write(content)
+        return
+    
+    # Otherwise, print to console with Rich formatting
     if format_type == 'json':
         # Use Rich's syntax highlighting for JSON
         json_str = _format_json(messages)

@@ -35,7 +35,9 @@ def main():
               help='LangSmith project UUID (overrides config). Find in UI or via trace session_id.')
 @click.option('--format', 'format_type', type=click.Choice(['raw', 'json', 'pretty']),
               help='Output format: raw (compact JSON), json (pretty JSON), pretty (human-readable panels)')
-def thread(thread_id, project_uuid, format_type):
+@click.option('--file', 'output_file', metavar='PATH',
+              help='Save output to file instead of printing to stdout')
+def thread(thread_id, project_uuid, format_type, output_file):
     """Fetch messages for a LangGraph thread by thread_id.
 
     A thread represents a conversation or session containing multiple traces. Each
@@ -99,7 +101,7 @@ def thread(thread_id, project_uuid, format_type):
         messages = fetchers.fetch_thread(thread_id, project_uuid, api_key)
 
         # Output
-        formatters.print_formatted(messages, format_type)
+        formatters.print_formatted(messages, format_type, output_file)
 
     except Exception as e:
         click.echo(f"Error fetching thread: {e}", err=True)
@@ -110,7 +112,9 @@ def thread(thread_id, project_uuid, format_type):
 @click.argument('trace_id', metavar='TRACE_ID')
 @click.option('--format', 'format_type', type=click.Choice(['raw', 'json', 'pretty']),
               help='Output format: raw (compact JSON), json (pretty JSON), pretty (human-readable panels)')
-def trace(trace_id, format_type):
+@click.option('--file', 'output_file', metavar='PATH',
+              help='Save output to file instead of printing to stdout')
+def trace(trace_id, format_type, output_file):
     """Fetch messages for a single trace by trace ID.
 
     A trace represents a single execution path containing multiple runs (LLM calls,
@@ -156,7 +160,7 @@ def trace(trace_id, format_type):
         messages = fetchers.fetch_trace(trace_id, api_key)
 
         # Output
-        formatters.print_formatted(messages, format_type)
+        formatters.print_formatted(messages, format_type, output_file)
 
     except Exception as e:
         click.echo(f"Error fetching trace: {e}", err=True)
