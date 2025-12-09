@@ -13,13 +13,12 @@ def main():
 
     REQUIREMENTS:
       - LANGSMITH_API_KEY environment variable or stored in config
-      - Project UUID (required for thread fetching only)
 
     COMMON COMMANDS:
-      langsmith-fetch trace <trace-id>                    # Fetch a single trace
-      langsmith-fetch thread <thread-id>                  # Fetch all traces in a thread
-      langsmith-fetch config set project-uuid <uuid>      # Configure project UUID
-      langsmith-fetch config set api-key <key>            # Store API key in config
+      langsmith-fetch trace <trace-id>                                  # Fetch a single trace
+      langsmith-fetch thread <thread-id> --project-uuid <uuid>          # Fetch all traces in a thread
+      langsmith-fetch config set project-uuid <uuid>                    # Store project UUID (advanced)
+      langsmith-fetch config set api-key <key>                          # Store API key in config
 
     OUTPUT FORMATS:
       --format pretty   Human-readable with Rich panels (default)
@@ -248,7 +247,6 @@ def config_show():
 
 # Register config subcommands under main CLI
 main.add_command(config_cmd, name='config')
-
 
 if __name__ == '__main__':
     main()

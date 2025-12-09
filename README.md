@@ -35,11 +35,10 @@ Fetch a trace by ID:
 langsmith-fetch trace 3b0b15fe-1e3a-4aef-afa8-48df15879cfe
 ```
 
-Set your project UUID and fetch a thread:
+Fetch a thread by ID with project UUID:
 
 ```bash
-langsmith-fetch config set project-uuid <your-project-uuid>
-langsmith-fetch thread test-email-agent-thread
+langsmith-fetch thread test-email-agent-thread --project-uuid <your-project-uuid>
 ```
 
 ### Output Formats
@@ -92,38 +91,18 @@ run = client.read_run('<any-trace-id>')
 print(run.session_id)  # This is your project UUID
 ```
 
-## Configuration
-
-Add your project UUID and API key to the config file:
-
-```bash
-# Set project UUID (required for thread fetching)
-langsmith-fetch config set project-uuid <your-project-uuid>
-
-# Set API key (optional, uses LANGSMITH_API_KEY env var by default)
-langsmith-fetch config set api-key lsv2_...
-
-# View your configuration
-langsmith-fetch config show
-```
-
-Config file location: `~/.langsmith-cli/config.yaml`
-
 ## Usage
 
 ### Fetch Thread by LangGraph thread_id
 
 ```bash
-# With config file (project UUID already set)
-langsmith-fetch thread test-email-agent-thread
-
-# Override project UUID
+# Fetch with project UUID
 langsmith-fetch thread test-email-agent-thread --project-uuid <uuid>
 
 # Specify output format
-langsmith-fetch thread test-email-agent-thread --format json
-langsmith-fetch thread test-email-agent-thread --format pretty
-langsmith-fetch thread test-email-agent-thread --format raw
+langsmith-fetch thread test-email-agent-thread --project-uuid <uuid> --format json
+langsmith-fetch thread test-email-agent-thread --project-uuid <uuid> --format pretty
+langsmith-fetch thread test-email-agent-thread --project-uuid <uuid> --format raw
 ```
 
 ### Fetch Trace by UUID
