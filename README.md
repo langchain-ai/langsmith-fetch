@@ -1,11 +1,13 @@
 # LangSmith Fetch
 
-CLI for fetching and displaying LangSmith data with LLM friendly formatting: 
+CLI for fetching and displaying LangSmith data with LLM friendly formatting:
 
 - Fetch LangGraph thread messages by thread_id
 - Fetch individual trace messages by trace ID
 - Multiple output formats: raw JSON, pretty JSON, or human-readable
 - Config file support for storing project UUID and preferences
+
+![LangSmith Fetch Banner](images/banner.jpg)
 
 ## 🚀 Quickstart
 
@@ -108,6 +110,10 @@ langsmith-fetch thread test-email-agent-thread --format pretty
 langsmith-fetch thread test-email-agent-thread --format raw
 ```
 
+- **raw**: Compact JSON (single line)
+- **json**: Pretty-printed JSON with syntax highlighting
+- **pretty**: Human-readable formatted text with Rich panels
+
 ### Fetch Trace by UUID
 
 ```bash
@@ -117,12 +123,6 @@ langsmith-fetch trace 3b0b15fe-1e3a-4aef-afa8-48df15879cfe
 # With format option
 langsmith-fetch trace 3b0b15fe-1e3a-4aef-afa8-48df15879cfe --format json
 ```
-
-### Output Formats
-
-- **raw**: Compact JSON (single line)
-- **json**: Pretty-printed JSON with syntax highlighting
-- **pretty**: Human-readable formatted text with Rich panels
 
 ## Examples
 
@@ -168,15 +168,6 @@ Run directly with Python module syntax:
 python -m langsmith_cli thread test-email-agent-thread
 ```
 
-## Requirements
-
-- Python >= 3.10
-- click >= 8.0
-- rich >= 13.0
-- pyyaml >= 6.0
-- requests >= 2.31
-- python-dotenv >= 1.0
-
 ## License
 
-Part of the deepagents-quickstarts repository.
+MIT
