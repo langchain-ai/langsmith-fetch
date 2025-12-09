@@ -246,6 +246,127 @@ class TestThreadCommand:
                 assert "LANGSMITH_API_KEY not found" in result.output
 
 
+class TestThreadsCommand:
+    """Tests for threads command."""
+
+    @responses.activate
+    def test_threads_default_limit(self, sample_thread_response, mock_env_api_key, temp_config_dir, tmp_path):
+        """Test threads command with default limit."""
+        with patch('langsmith_cli.config.CONFIG_DIR', temp_config_dir):
+            with patch('langsmith_cli.config.CONFIG_FILE', temp_config_dir / 'config.yaml'):
+                from langsmith_cli.config import set_config_value
+                set_config_value('project-uuid', TEST_PROJECT_UUID)
+
+                # Mock the runs query endpoint
+                responses.add(
+                    responses.POST,
+                    f"{TEST_BASE_URL}/runs/query",
+                    json={
+                        "runs": [
+                            {
+                                "id": "run-1",
+                                "start_time": "2024-01-01T00:00:00Z",
+                                "extra": {
+                                    "metadata": {
+                                        "thread_id": "thread-1"
+                                    }
+                                }
+                            },
+                            {
+                                "id": "run-2",
+                                "start_time": "2024-01-02T00:00:00Z",
+                                "extra": {
+                                    "metadata": {
+                                        "thread_id": "thread-2"
+                                    }
+                                }
+                            }
+                        ]
+                    },
+                    status=200
+                )
+
+                # Mock the thread fetch endpoints
+                responses.add(
+                    responses.GET,
+                    f"{TEST_BASE_URL}/runs/threads/thread-1",
+                    json=sample_thread_response,
+                    status=200
+                )
+                responses.add(
+                    responses.GET,
+                    f"{TEST_BASE_URL}/runs/threads/thread-2",
+                    json=sample_thread_response,
+                    status=200
+                )
+
+                runner = CliRunner()
+                output_dir = tmp_path / "threads"
+                result = runner.invoke(main, ['threads', str(output_dir)])
+
+                assert result.exit_code == 0
+                assert "Found 2 thread(s)" in result.output
+                assert "Successfully saved 2 thread(s)" in result.output
+
+                # Check that files were created
+                assert (output_dir / "thread-1.json").exists()
+                assert (output_dir / "thread-2.json").exists()
+
+    @responses.activate
+    def test_threads_custom_limit(self, sample_thread_response, mock_env_api_key, temp_config_dir, tmp_path):
+        """Test threads command with custom limit."""
+        with patch('langsmith_cli.config.CONFIG_DIR', temp_config_dir):
+            with patch('langsmith_cli.config.CONFIG_FILE', temp_config_dir / 'config.yaml'):
+                from langsmith_cli.config import set_config_value
+                set_config_value('project-uuid', TEST_PROJECT_UUID)
+
+                # Mock the runs query endpoint
+                responses.add(
+                    responses.POST,
+                    f"{TEST_BASE_URL}/runs/query",
+                    json={
+                        "runs": [
+                            {
+                                "id": "run-1",
+                                "start_time": "2024-01-01T00:00:00Z",
+                                "extra": {
+                                    "metadata": {
+                                        "thread_id": "thread-1"
+                                    }
+                                }
+                            }
+                        ]
+                    },
+                    status=200
+                )
+
+                # Mock the thread fetch endpoint
+                responses.add(
+                    responses.GET,
+                    f"{TEST_BASE_URL}/runs/threads/thread-1",
+                    json=sample_thread_response,
+                    status=200
+                )
+
+                runner = CliRunner()
+                output_dir = tmp_path / "threads"
+                result = runner.invoke(main, ['threads', str(output_dir), '--limit', '5'])
+
+                assert result.exit_code == 0
+                assert "thread-1" in result.output
+
+    def test_threads_no_project_uuid(self, mock_env_api_key, temp_config_dir, tmp_path):
+        """Test threads command fails without project UUID."""
+        with patch('langsmith_cli.config.CONFIG_DIR', temp_config_dir):
+            with patch('langsmith_cli.config.CONFIG_FILE', temp_config_dir / 'config.yaml'):
+                runner = CliRunner()
+                output_dir = tmp_path / "threads"
+                result = runner.invoke(main, ['threads', str(output_dir)])
+
+                assert result.exit_code == 1
+                assert "project-uuid required" in result.output
+
+
 class TestLatestCommand:
     """Tests for latest command."""
 
