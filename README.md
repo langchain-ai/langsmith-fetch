@@ -64,6 +64,21 @@ LangSmith Fetch supports three output formats for different use cases:
   - Best for: Shell pipelines, automated processing, scripts
   - Example: `langsmith-fetch trace <id> --format raw | jq '.[] | select(.role=="user")'`
 
+### Save to File
+
+All commands support saving output to a file instead of printing to stdout:
+
+```bash
+# Save trace to JSON file
+langsmith-fetch trace <trace-id> --file output.json --format json
+
+# Save thread to text file
+langsmith-fetch thread <thread-id> --file output.txt --format pretty
+
+# Save latest trace to file
+langsmith-fetch latest --file latest.json --format raw
+```
+
 ## Features
 
 ### Understanding LangSmith Data Organization
@@ -139,6 +154,9 @@ langsmith-fetch thread test-email-agent-thread --project-uuid <uuid>
 langsmith-fetch thread test-email-agent-thread --format json
 langsmith-fetch thread test-email-agent-thread --format pretty
 langsmith-fetch thread test-email-agent-thread --format raw
+
+# Save to file
+langsmith-fetch thread test-email-agent-thread --file output.json --format json
 ```
 
 ### Fetch Trace by UUID
@@ -149,6 +167,9 @@ langsmith-fetch trace 3b0b15fe-1e3a-4aef-afa8-48df15879cfe
 
 # With format option
 langsmith-fetch trace 3b0b15fe-1e3a-4aef-afa8-48df15879cfe --format json
+
+# Save to file
+langsmith-fetch trace 3b0b15fe-1e3a-4aef-afa8-48df15879cfe --file trace.json --format json
 ```
 
 ### Auto-Fetch Latest Trace
@@ -170,6 +191,9 @@ langsmith-fetch latest --since 2025-12-09T10:00:00Z
 
 # Fetch with JSON output format
 langsmith-fetch latest --format json
+
+# Save to file
+langsmith-fetch latest --file latest.json --format raw
 ```
 
 **Notes:**
