@@ -40,7 +40,7 @@ Set your project UUID and fetch recent threads:
 
 ```bash
 langsmith-fetch config set project-uuid <your-project-uuid>
-langsmith-fetch threads --limit 10
+langsmith-fetch threads ./my-threads --limit 10
 ```
 
 Or fetch a specific thread by ID:
@@ -123,20 +123,17 @@ Config file location: `~/.langsmith-cli/config.yaml`
 Fetch the most recent threads from a project and save each to a separate JSON file:
 
 ```bash
-# Fetch 10 most recent threads (default)
-langsmith-fetch threads
+# Fetch 10 most recent threads (default) to ./my-threads directory
+langsmith-fetch threads ./my-threads
 
 # Fetch 25 most recent threads
-langsmith-fetch threads --limit 25
-
-# Save to custom directory
-langsmith-fetch threads --output-dir ./my-threads
+langsmith-fetch threads ./my-threads --limit 25
 
 # Override project UUID
-langsmith-fetch threads --project-uuid <uuid>
+langsmith-fetch threads ./my-threads --project-uuid <uuid>
 ```
 
-This creates one JSON file per thread in the output directory (default: `./threads/`), with each file named by the thread_id.
+This creates one JSON file per thread in the specified output directory, with each file named by the thread_id.
 
 ### Fetch Thread by LangGraph thread_id
 

@@ -5,6 +5,12 @@ import requests
 from typing import List, Dict, Any, Optional, Tuple
 from collections import OrderedDict
 
+try:
+    from langsmith import Client
+    HAS_LANGSMITH = True
+except ImportError:
+    HAS_LANGSMITH = False
+
 
 BASE_URL = "https://api.smith.langchain.com"
 
@@ -107,19 +113,27 @@ def fetch_recent_threads(
         "Content-Type": "application/json"
     }
 
-    # Query for root runs in the project, sorted by start time descending
+    # Query for root runs in the project
     url = f"{BASE_URL}/runs/query"
     body = {
         "session": [project_uuid],
-        "is_root": True,
-        "select": ["id", "extra", "start_time"],
-        "limit": 1000,  # Fetch more runs to find unique threads
+        "is_root": True
     }
 
-    response = requests.post(url, headers=headers, json=body)
-    response.raise_for_status()
+    response = requests.post(url, headers=headers, data=json.dumps(body))
+    
+    # Add better error handling
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as e:
+        # Print response content for debugging
+        print(f"API Error Response ({response.status_code}): {response.text}")
+        print(f"Request body was: {json.dumps(body, indent=2)}")
+        raise
 
     data = response.json()
+    
+    # The response should have a 'runs' key
     runs = data.get('runs', [])
 
     # Extract unique thread_ids with their most recent timestamp

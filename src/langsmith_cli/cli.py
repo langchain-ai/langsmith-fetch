@@ -21,7 +21,7 @@ def main():
     COMMON COMMANDS:
       langsmith-fetch trace <trace-id>                    # Fetch a single trace
       langsmith-fetch thread <thread-id>                  # Fetch all traces in a thread
-      langsmith-fetch threads --limit 10                  # Fetch recent threads and save to files
+      langsmith-fetch threads <output-dir> --limit 10     # Fetch recent threads and save to files
       langsmith-fetch config set project-uuid <uuid>      # Configure project UUID
       langsmith-fetch config set api-key <key>            # Store API key in config
 
@@ -168,17 +168,21 @@ def trace(trace_id, format_type):
 
 
 @main.command()
+@click.argument('output_dir', type=click.Path(), metavar='OUTPUT_DIR')
 @click.option('--project-uuid', metavar='UUID',
               help='LangSmith project UUID (overrides config). Find in UI or via trace session_id.')
 @click.option('--limit', '-n', type=int, default=10,
               help='Maximum number of threads to fetch (default: 10)')
-@click.option('--output-dir', '-o', type=click.Path(),
-              help='Directory to save thread files (default: ./threads)')
-def threads(project_uuid, limit, output_dir):
+def threads(output_dir, project_uuid, limit):
     """Fetch recent threads for a project and save to files.
 
     This command fetches the N most recent threads from a LangSmith project and
-    saves each thread's messages to a separate JSON file in the output directory.
+    saves each thread's messages to a separate JSON file in the specified output
+    directory.
+
+    \b
+    ARGUMENTS:
+      OUTPUT_DIR  Directory where thread files will be saved (required)
 
     \b
     RETURNS:
@@ -187,17 +191,14 @@ def threads(project_uuid, limit, output_dir):
 
     \b
     EXAMPLES:
-      # Fetch 10 most recent threads (default)
-      langsmith-fetch threads
+      # Fetch 10 most recent threads to ./my-threads directory
+      langsmith-fetch threads ./my-threads
 
       # Fetch 25 most recent threads
-      langsmith-fetch threads --limit 25
+      langsmith-fetch threads ./my-threads --limit 25
 
       # Fetch threads with explicit project UUID
-      langsmith-fetch threads --project-uuid 80f1ecb3-a16b-411e-97ae-1c89adbb5c49
-
-      # Save to custom directory
-      langsmith-fetch threads --output-dir ./my-threads
+      langsmith-fetch threads ./my-threads --project-uuid 80f1ecb3-a16b-411e-97ae-1c89adbb5c49
 
     \b
     PREREQUISITES:
@@ -220,10 +221,6 @@ def threads(project_uuid, limit, output_dir):
     if not project_uuid:
         click.echo("Error: project-uuid required. Set with: langsmith-fetch config set project-uuid <uuid>", err=True)
         sys.exit(1)
-
-    # Set default output directory
-    if not output_dir:
-        output_dir = "./threads"
 
     # Create output directory
     output_path = Path(output_dir)

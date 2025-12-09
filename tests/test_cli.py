@@ -302,7 +302,7 @@ class TestThreadsCommand:
 
                 runner = CliRunner()
                 output_dir = tmp_path / "threads"
-                result = runner.invoke(main, ['threads', '--output-dir', str(output_dir)])
+                result = runner.invoke(main, ['threads', str(output_dir)])
 
                 assert result.exit_code == 0
                 assert "Found 2 thread(s)" in result.output
@@ -350,17 +350,18 @@ class TestThreadsCommand:
 
                 runner = CliRunner()
                 output_dir = tmp_path / "threads"
-                result = runner.invoke(main, ['threads', '--limit', '5', '--output-dir', str(output_dir)])
+                result = runner.invoke(main, ['threads', str(output_dir), '--limit', '5'])
 
                 assert result.exit_code == 0
                 assert "thread-1" in result.output
 
-    def test_threads_no_project_uuid(self, mock_env_api_key, temp_config_dir):
+    def test_threads_no_project_uuid(self, mock_env_api_key, temp_config_dir, tmp_path):
         """Test threads command fails without project UUID."""
         with patch('langsmith_cli.config.CONFIG_DIR', temp_config_dir):
             with patch('langsmith_cli.config.CONFIG_FILE', temp_config_dir / 'config.yaml'):
                 runner = CliRunner()
-                result = runner.invoke(main, ['threads'])
+                output_dir = tmp_path / "threads"
+                result = runner.invoke(main, ['threads', str(output_dir)])
 
                 assert result.exit_code == 1
                 assert "project-uuid required" in result.output
