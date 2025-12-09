@@ -238,7 +238,7 @@ def config_show():
         click.echo(f"Location: {config.CONFIG_FILE}\n")
         for key, value in cfg.items():
             # Hide API key for security
-            if key == 'api_key':
+            if key in ('api_key', 'api-key'):
                 value = value[:10] + "..." if value else "(not set)"
             click.echo(f"  {key}: {value}")
     except Exception as e:
