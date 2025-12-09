@@ -404,6 +404,68 @@ class TestThreadsCommand:
                 assert result.exit_code == 1
                 assert "project-uuid required" in result.output
 
+    @responses.activate
+    def test_threads_custom_filename_pattern(
+        self, sample_thread_response, mock_env_api_key, temp_config_dir, tmp_path
+    ):
+        """Test threads command with custom filename pattern."""
+        with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
+            with patch(
+                "langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"
+            ):
+                from langsmith_cli.config import set_config_value
+
+                set_config_value("project-uuid", TEST_PROJECT_UUID)
+
+                # Mock the runs query endpoint
+                responses.add(
+                    responses.POST,
+                    f"{TEST_BASE_URL}/runs/query",
+                    json={
+                        "runs": [
+                            {
+                                "id": "run-1",
+                                "start_time": "2024-01-01T00:00:00Z",
+                                "extra": {"metadata": {"thread_id": "thread-1"}},
+                            },
+                            {
+                                "id": "run-2",
+                                "start_time": "2024-01-02T00:00:00Z",
+                                "extra": {"metadata": {"thread_id": "thread-2"}},
+                            },
+                        ]
+                    },
+                    status=200,
+                )
+
+                # Mock the thread fetch endpoints
+                for thread_id in ["thread-1", "thread-2"]:
+                    responses.add(
+                        responses.GET,
+                        f"{TEST_BASE_URL}/runs/threads/{thread_id}",
+                        json=sample_thread_response,
+                        status=200,
+                    )
+
+                runner = CliRunner()
+                output_dir = tmp_path / "threads"
+                result = runner.invoke(
+                    main,
+                    [
+                        "threads",
+                        str(output_dir),
+                        "--filename-pattern",
+                        "thread_{index:03d}.json",
+                    ],
+                )
+
+                assert result.exit_code == 0
+                assert "Found 2 thread(s)" in result.output
+
+                # Check that files were created with custom pattern
+                assert (output_dir / "thread_001.json").exists()
+                assert (output_dir / "thread_002.json").exists()
+
 
 class TestLatestCommand:
     """Tests for latest command."""

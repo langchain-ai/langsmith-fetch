@@ -270,7 +270,12 @@ def trace(trace_id, format_type, output_file):
     default=10,
     help="Maximum number of threads to fetch (default: 10)",
 )
-def threads(output_dir, project_uuid, limit):
+@click.option(
+    "--filename-pattern",
+    default="{thread_id}.json",
+    help="Filename pattern for saved threads. Use {thread_id} for thread ID, {index} for sequential number (default: {thread_id}.json)",
+)
+def threads(output_dir, project_uuid, limit, filename_pattern):
     """Fetch recent threads for a project and save to files (BULK OPERATION).
 
     This command is designed for bulk operations where you need multiple threads
@@ -291,10 +296,13 @@ def threads(output_dir, project_uuid, limit):
 
     \b
     FILE NAMING:
-      - Files named: {thread_id}.json (sanitized for safety)
+      - Default pattern: {thread_id}.json
+      - Customize with --filename-pattern option
+      - Available placeholders: {thread_id}, {index}
+      - Example: --filename-pattern "thread_{index:03d}.json" → thread_001.json, thread_002.json
+      - All filenames sanitized to ensure safe names across platforms
       - Directory created automatically if it doesn't exist
       - Existing files with same name will be overwritten
-      - Thread IDs sanitized to ensure safe filenames across all platforms
 
     \b
     RETURNS:
@@ -303,11 +311,14 @@ def threads(output_dir, project_uuid, limit):
 
     \b
     EXAMPLES:
-      # Fetch 10 most recent threads to ./my-threads directory
+      # Fetch 10 most recent threads to ./my-threads directory (default naming)
       langsmith-fetch threads ./my-threads
 
-      # Fetch 25 most recent threads
-      langsmith-fetch threads ./my-threads --limit 25
+      # Fetch 25 most recent threads with sequential numbering
+      langsmith-fetch threads ./my-threads --limit 25 --filename-pattern "thread_{index:03d}.json"
+
+      # Use custom pattern with thread ID
+      langsmith-fetch threads ./my-threads --filename-pattern "{thread_id}_export.json"
 
       # Fetch threads with explicit project UUID
       langsmith-fetch threads ./my-threads --project-uuid 80f1ecb3-a16b-411e-97ae-1c89adbb5c49
@@ -370,19 +381,35 @@ def threads(output_dir, project_uuid, limit):
 
         click.echo(f"Found {len(threads_data)} thread(s). Saving to {output_path}/")
 
-        # Save each thread to a file
-        for thread_id, messages in threads_data:
-            # Sanitize thread_id for safe filename
-            safe_thread_id = sanitize_filename(thread_id)
-            # Ensure .json extension
-            if not safe_thread_id.endswith(".json"):
-                safe_thread_id = f"{safe_thread_id}.json"
+        # Validate filename pattern (check for placeholders with or without format specs)
+        has_thread_id = re.search(r"\{thread_id[^}]*\}", filename_pattern)
+        has_index = re.search(r"\{index[^}]*\}", filename_pattern) or re.search(
+            r"\{idx[^}]*\}", filename_pattern
+        )
+        if not (has_thread_id or has_index):
+            click.echo(
+                "Error: Filename pattern must contain {thread_id} or {index}",
+                err=True,
+            )
+            sys.exit(1)
 
-            filename = output_path / safe_thread_id
+        # Save each thread to a file
+        for index, (thread_id, messages) in enumerate(threads_data, start=1):
+            # Generate filename from pattern
+            filename_str = filename_pattern.format(
+                thread_id=thread_id, index=index, idx=index
+            )
+            # Sanitize the generated filename
+            safe_filename = sanitize_filename(filename_str)
+            # Ensure .json extension if not present
+            if not safe_filename.endswith(".json"):
+                safe_filename = f"{safe_filename}.json"
+
+            filename = output_path / safe_filename
             with open(filename, "w") as f:
                 json.dump(messages, f, indent=2, default=str)
             click.echo(
-                f"  ✓ Saved {thread_id} to {safe_thread_id} ({len(messages)} messages)"
+                f"  ✓ Saved {thread_id} to {safe_filename} ({len(messages)} messages)"
             )
 
         click.echo(

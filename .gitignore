@@ -39,3 +39,6 @@ Thumbs.db
 
 # Config (local)
 .env
+
+# Example/testing code
+example/
