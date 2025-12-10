@@ -199,7 +199,7 @@ class TestFetchLatestTrace:
         # Verify list_runs was called with correct parameters
         mock_client.list_runs.assert_called_once()
         call_kwargs = mock_client.list_runs.call_args[1]
-        assert call_kwargs["is_root"] is True
+        assert call_kwargs["filter"] == 'and(eq(is_root, true), neq(status, "pending"))'
         assert call_kwargs["limit"] == 1
 
         # Verify the messages were fetched correctly
@@ -245,7 +245,7 @@ class TestFetchLatestTrace:
         # Verify list_runs was called with project_id
         call_kwargs = mock_client.list_runs.call_args[1]
         assert call_kwargs["project_id"] == TEST_PROJECT_UUID
-        assert call_kwargs["is_root"] is True
+        assert call_kwargs["filter"] == 'and(eq(is_root, true), neq(status, "pending"))'
         assert call_kwargs["limit"] == 1
 
         assert isinstance(messages, list)
@@ -279,7 +279,7 @@ class TestFetchLatestTrace:
         call_kwargs = mock_client.list_runs.call_args[1]
         assert "start_time" in call_kwargs
         assert isinstance(call_kwargs["start_time"], datetime)
-        assert call_kwargs["is_root"] is True
+        assert call_kwargs["filter"] == 'and(eq(is_root, true), neq(status, "pending"))'
 
         assert isinstance(messages, list)
 
@@ -313,7 +313,7 @@ class TestFetchLatestTrace:
         call_kwargs = mock_client.list_runs.call_args[1]
         assert "start_time" in call_kwargs
         assert isinstance(call_kwargs["start_time"], datetime)
-        assert call_kwargs["is_root"] is True
+        assert call_kwargs["filter"] == 'and(eq(is_root, true), neq(status, "pending"))'
 
         assert isinstance(messages, list)
 
@@ -345,7 +345,7 @@ class TestFetchLatestTrace:
         # Verify list_runs was called WITHOUT project_id parameter
         call_kwargs = mock_client.list_runs.call_args[1]
         assert "project_id" not in call_kwargs
-        assert call_kwargs["is_root"] is True
+        assert call_kwargs["filter"] == 'and(eq(is_root, true), neq(status, "pending"))'
         assert call_kwargs["limit"] == 1
 
         assert isinstance(messages, list)
@@ -393,7 +393,7 @@ class TestFetchRecentTraces:
         # Verify list_runs was called with correct parameters
         mock_client.list_runs.assert_called_once()
         call_kwargs = mock_client.list_runs.call_args[1]
-        assert call_kwargs["is_root"] is True
+        assert call_kwargs["filter"] == 'and(eq(is_root, true), neq(status, "pending"))'
         assert call_kwargs["limit"] == 2
 
         # Verify the traces were fetched correctly
@@ -446,7 +446,7 @@ class TestFetchRecentTraces:
         # Verify list_runs was called with project_id
         call_kwargs = mock_client.list_runs.call_args[1]
         assert call_kwargs["project_id"] == TEST_PROJECT_UUID
-        assert call_kwargs["is_root"] is True
+        assert call_kwargs["filter"] == 'and(eq(is_root, true), neq(status, "pending"))'
         assert call_kwargs["limit"] == 1
 
         assert isinstance(traces_data, list)
@@ -481,7 +481,7 @@ class TestFetchRecentTraces:
         call_kwargs = mock_client.list_runs.call_args[1]
         assert "start_time" in call_kwargs
         assert isinstance(call_kwargs["start_time"], datetime)
-        assert call_kwargs["is_root"] is True
+        assert call_kwargs["filter"] == 'and(eq(is_root, true), neq(status, "pending"))'
 
         assert isinstance(traces_data, list)
 
@@ -515,7 +515,7 @@ class TestFetchRecentTraces:
         call_kwargs = mock_client.list_runs.call_args[1]
         assert "start_time" in call_kwargs
         assert isinstance(call_kwargs["start_time"], datetime)
-        assert call_kwargs["is_root"] is True
+        assert call_kwargs["filter"] == 'and(eq(is_root, true), neq(status, "pending"))'
 
         assert isinstance(traces_data, list)
 

@@ -299,7 +299,7 @@ def fetch_recent_traces(
 
     # Build filter parameters
     filter_params = {
-        "is_root": True,
+        "filter": 'and(eq(is_root, true), neq(status, "pending"))',
         "limit": limit,
     }
 
