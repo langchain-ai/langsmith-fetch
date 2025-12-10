@@ -289,7 +289,7 @@ class TestThreadsCommand:
     def test_threads_default_limit(
         self, sample_thread_response, mock_env_api_key, temp_config_dir, tmp_path
     ):
-        """Test threads command with default limit."""
+        """Test threads command with default limit (1)."""
         with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
             with patch(
                 "langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"
@@ -319,16 +319,10 @@ class TestThreadsCommand:
                     status=200,
                 )
 
-                # Mock the thread fetch endpoints
+                # Mock the thread fetch endpoint
                 responses.add(
                     responses.GET,
                     f"{TEST_BASE_URL}/runs/threads/thread-1",
-                    json=sample_thread_response,
-                    status=200,
-                )
-                responses.add(
-                    responses.GET,
-                    f"{TEST_BASE_URL}/runs/threads/thread-2",
                     json=sample_thread_response,
                     status=200,
                 )
@@ -338,12 +332,12 @@ class TestThreadsCommand:
                 result = runner.invoke(main, ["threads", str(output_dir)])
 
                 assert result.exit_code == 0
-                assert "Found 2 thread(s)" in result.output
-                assert "Successfully saved 2 thread(s)" in result.output
+                assert "Found 1 thread(s)" in result.output
+                assert "Successfully saved 1 thread(s)" in result.output
 
-                # Check that files were created
+                # Check that only one file was created (default limit is 1)
                 assert (output_dir / "thread-1.json").exists()
-                assert (output_dir / "thread-2.json").exists()
+                assert not (output_dir / "thread-2.json").exists()
 
     @responses.activate
     def test_threads_custom_limit(
@@ -454,6 +448,8 @@ class TestThreadsCommand:
                     [
                         "threads",
                         str(output_dir),
+                        "--limit",
+                        "2",
                         "--filename-pattern",
                         "thread_{index:03d}.json",
                     ],
