@@ -18,13 +18,25 @@ CLI for fetching and displaying LangSmith data with LLM friendly formatting:
 pip install langsmith-fetch
 ```
 
-### Basic Usage
+### Setup
 
-Set your API key:
+Set your LangSmith API key:
 
 ```bash
 export LANGSMITH_API_KEY=lsv2_...
 ```
+
+Get your LangSmith project UUID (not name - UUID)
+
+## Usage with a coding agent
+
+Start your favorite coding agent.
+
+Ask it:
+
+**Use langsmith-fetch to analyze the last 3 threads from project <project-uuid> for potential improvements**
+
+## Direct Usage
 
 Set your project UUID (recommended for most workflows):
 
