@@ -41,22 +41,23 @@ def main():
 
     REQUIREMENTS:
       - LANGSMITH_API_KEY environment variable or stored in config
-      - Project UUID (required for thread fetching only)
+      - Project UUID (required for threads, optional for traces)
 
     COMMON COMMANDS:
-      langsmith-fetch traces                              # Fetch recent trace(s) (by time)
-      langsmith-fetch traces ./dir --limit 10             # Fetch 10 traces to directory
       langsmith-fetch trace <trace-id>                    # Fetch a specific trace by ID
       langsmith-fetch thread <thread-id>                  # Fetch a specific thread by ID
-      langsmith-fetch threads <output-dir> --limit 10     # Fetch recent threads (bulk)
+      langsmith-fetch traces ./dir --limit 10             # Fetch 10 traces to directory (RECOMMENDED)
+      langsmith-fetch threads ./dir --limit 10            # Fetch 10 threads to directory (RECOMMENDED)
       langsmith-fetch config set project-uuid <uuid>      # Configure project UUID
       langsmith-fetch config set api-key <key>            # Store API key in config
+
+    NOTE: When using 'traces' or 'threads' commands, ALWAYS specify an output directory
+    unless you explicitly want to print to stdout. Use directory mode for typical usage.
 
     OUTPUT FORMATS:
       --format pretty   Human-readable with Rich panels (default)
       --format json     Pretty-printed JSON with syntax highlighting
       --format raw      Compact single-line JSON for piping
-      --file <path>     Save output to file instead of stdout (single traces/threads)
 
     FOR LLMs AND AUTOMATION:
       When fetching data programmatically, use these guidelines:
@@ -65,32 +66,29 @@ def main():
         langsmith-fetch trace <trace-id> --format raw
         langsmith-fetch thread <thread-id> --format raw
 
-      FETCH MOST RECENT TRACE (by chronological time):
-        langsmith-fetch traces --project-uuid <uuid> --format raw
-        WARNING: Without --project-uuid, searches ALL projects chronologically.
-        May not return the trace you expect. Always specify --project-uuid or
-        use time filters (--last-n-minutes or --since) to target the right trace.
-
-      BULK FETCH MULTIPLE TRACES (saves to directory):
+      BULK FETCH MULTIPLE (saves to directory - RECOMMENDED DEFAULT):
         langsmith-fetch traces ./output-folder --limit 10
-        # Creates one JSON file per trace in output-folder/
-
-      BULK FETCH MULTIPLE THREADS (saves to directory):
         langsmith-fetch threads ./output-folder --limit 10
-        # Creates one JSON file per thread in output-folder/
+        # Creates one JSON file per trace/thread in output-folder/
+        # USE THIS BY DEFAULT unless user explicitly asks for stdout
+
+      FETCH TO STDOUT (only if user explicitly requests it):
+        langsmith-fetch traces --project-uuid <uuid> --format raw
+        langsmith-fetch threads --project-uuid <uuid> --format raw
+        NOTE: For threads, --project-uuid is REQUIRED
 
     WORKFLOW EXAMPLES:
-      # Quick inspection (default: pretty format to stdout)
-      langsmith-fetch traces
-
-      # Save for processing (raw JSON to file)
-      langsmith-fetch traces --format raw --file latest.json
-
-      # Bulk export (multiple traces to folder)
+      # Bulk export to directory (RECOMMENDED - use this by default)
       langsmith-fetch traces ./my-traces --limit 10
-
-      # Bulk export (multiple threads to folder)
       langsmith-fetch threads ./my-threads --limit 25
+
+      # Fetch to stdout (only if user explicitly wants stdout output)
+      langsmith-fetch traces --limit 5 --format json
+      langsmith-fetch threads --limit 5 --format json
+
+      # Quick inspection of single item
+      langsmith-fetch trace <trace-id>
+      langsmith-fetch thread <thread-id>
     """
     pass
 
@@ -264,7 +262,7 @@ def trace(trace_id, format_type, output_file):
 
 
 @main.command()
-@click.argument("output_dir", type=click.Path(), metavar="OUTPUT_DIR")
+@click.argument("output_dir", type=click.Path(), required=False, metavar="[OUTPUT_DIR]")
 @click.option(
     "--project-uuid",
     metavar="UUID",
@@ -274,13 +272,8 @@ def trace(trace_id, format_type, output_file):
     "--limit",
     "-n",
     type=int,
-    default=10,
-    help="Maximum number of threads to fetch (default: 10)",
-)
-@click.option(
-    "--filename-pattern",
-    default="{thread_id}.json",
-    help="Filename pattern for saved threads. Use {thread_id} for thread ID, {index} for sequential number (default: {thread_id}.json)",
+    default=1,
+    help="Maximum number of threads to fetch (default: 1)",
 )
 @click.option(
     "--last-n-minutes",
@@ -293,69 +286,72 @@ def trace(trace_id, format_type, output_file):
     metavar="TIMESTAMP",
     help="Only search threads since ISO timestamp (e.g., 2025-12-09T10:00:00Z)",
 )
-def threads(output_dir, project_uuid, limit, filename_pattern, last_n_minutes, since):
-    """Fetch recent threads for a project and save to files (BULK OPERATION).
+@click.option(
+    "--filename-pattern",
+    default="{thread_id}.json",
+    help="Filename pattern for saved threads (directory mode only). Use {thread_id} for thread ID, {index} for sequential number (default: {thread_id}.json)",
+)
+@click.option(
+    "--format",
+    "format_type",
+    type=click.Choice(["raw", "json", "pretty"]),
+    help="Output format: raw (compact JSON), json (pretty JSON), pretty (human-readable panels)",
+)
+def threads(
+    output_dir,
+    project_uuid,
+    limit,
+    last_n_minutes,
+    since,
+    filename_pattern,
+    format_type,
+):
+    """Fetch recent threads from LangSmith BY CHRONOLOGICAL TIME.
 
-    This command is designed for bulk operations where you need multiple threads
-    saved to disk for processing. Each thread is saved as a separate JSON file.
-
-    USE THIS COMMAND when:
-      - You need multiple threads (not just one)
-      - You want to save them to disk for batch processing
-      - You're building a dataset or corpus
-
-    USE 'thread' command (singular) when:
-      - You need just one specific thread by ID
-      - You want stdout output or a single file
-
-    \b
-    ARGUMENTS:
-      OUTPUT_DIR  Directory where thread files will be saved (created if needed)
-
-    \b
-    FILE NAMING:
-      - Default pattern: {thread_id}.json
-      - Customize with --filename-pattern option
-      - Available placeholders: {thread_id}, {index}
-      - Example: --filename-pattern "thread_{index:03d}.json" → thread_001.json, thread_002.json
-      - All filenames sanitized to ensure safe names across platforms
-      - Directory created automatically if it doesn't exist
-      - Existing files with same name will be overwritten
+    This command has TWO MODES:
 
     \b
-    RETURNS:
-      Creates one JSON file per thread in OUTPUT_DIR.
-      Each file contains all messages from all traces in that thread.
+    DIRECTORY MODE (with OUTPUT_DIR) - RECOMMENDED DEFAULT:
+      - Saves each thread as a separate JSON file in OUTPUT_DIR
+      - Use --limit to control how many threads (default: 1)
+      - Use --filename-pattern to customize filenames
+      - Examples:
+          langsmith-fetch threads ./my-threads --limit 10
+          langsmith-fetch threads ./my-threads --limit 25 --filename-pattern "thread_{index:03d}.json"
+      - USE THIS MODE BY DEFAULT unless user explicitly requests stdout output
 
     \b
-    EXAMPLES:
-      # Fetch 10 most recent threads to ./my-threads directory (default naming)
-      langsmith-fetch threads ./my-threads
-
-      # Fetch 25 most recent threads with sequential numbering
-      langsmith-fetch threads ./my-threads --limit 25 --filename-pattern "thread_{index:03d}.json"
-
-      # Use custom pattern with thread ID
-      langsmith-fetch threads ./my-threads --filename-pattern "{thread_id}_export.json"
-
-      # Fetch threads with explicit project UUID
-      langsmith-fetch threads ./my-threads --project-uuid 80f1ecb3-a16b-411e-97ae-1c89adbb5c49
+    STDOUT MODE (no OUTPUT_DIR) - Only if user explicitly requests it:
+      - Fetch threads and print to stdout
+      - Use --limit to fetch multiple threads
+      - Use --format to control output format (raw, json, pretty)
+      - Examples:
+          langsmith-fetch threads                          # Fetch latest thread, pretty format
+          langsmith-fetch threads --format json            # Fetch latest, JSON format
+          langsmith-fetch threads --limit 5                # Fetch 5 latest threads
 
     \b
-    TEMPORAL FILTERING:
+    TEMPORAL FILTERING (both modes):
       - --last-n-minutes N: Only fetch threads from last N minutes
       - --since TIMESTAMP: Only fetch threads since specific time
       - Examples:
-          langsmith-fetch threads ./my-threads --last-n-minutes 60
-          langsmith-fetch threads ./my-threads --since 2025-12-09T10:00:00Z
+          langsmith-fetch threads --last-n-minutes 30
+          langsmith-fetch threads --since 2025-12-09T10:00:00Z
+          langsmith-fetch threads ./dir --limit 10 --last-n-minutes 60
+
+    \b
+    IMPORTANT:
+      - Fetches threads by chronological timestamp (most recent first)
+      - Project UUID is REQUIRED (via --project-uuid or config)
 
     \b
     PREREQUISITES:
-      - LANGSMITH_API_KEY environment variable must be set, or
-        API key stored via: langsmith-fetch config set api-key <key>
-      - Project UUID must be set via: langsmith-fetch config set project-uuid <uuid>
-        or provided with --project-uuid option
+      - LANGSMITH_API_KEY environment variable or stored in config
+      - Project UUID (required, via config or --project-uuid flag)
     """
+    from rich.console import Console
+
+    console = Console()
 
     # Validate mutually exclusive options
     if last_n_minutes is not None and since is not None:
@@ -373,73 +369,82 @@ def threads(output_dir, project_uuid, limit, filename_pattern, last_n_minutes, s
         )
         sys.exit(1)
 
-    # Get project UUID (from option or config)
+    # Get project UUID (from option or config) - REQUIRED
     if not project_uuid:
         project_uuid = config.get_project_uuid()
 
     if not project_uuid:
         click.echo(
-            "Error: project-uuid required. Pass --project-uuid <uuid> flag",
+            "Error: project-uuid required. Set via config or pass --project-uuid flag",
             err=True,
         )
         sys.exit(1)
 
-    # Create and validate output directory
-    output_path = Path(output_dir).resolve()
+    # DIRECTORY MODE: output_dir provided
+    if output_dir:
+        # Validate incompatible options
+        if format_type:
+            click.echo(
+                "Warning: --format ignored in directory mode (files are always JSON)",
+                err=True,
+            )
 
-    try:
-        output_path.mkdir(parents=True, exist_ok=True)
-    except (OSError, PermissionError) as e:
-        click.echo(f"Error: Cannot create output directory: {e}", err=True)
-        sys.exit(1)
-
-    # Verify directory is writable
-    if not os.access(output_path, os.W_OK):
-        click.echo(f"Error: Output directory is not writable: {output_path}", err=True)
-        sys.exit(1)
-
-    try:
-        click.echo(
-            f"Fetching up to {limit} recent threads from project {project_uuid}..."
-        )
-
-        # Fetch recent threads
-        threads_data = fetchers.fetch_recent_threads(
-            project_uuid,
-            base_url,
-            api_key,
-            limit,
-            last_n_minutes=last_n_minutes,
-            since=since,
-        )
-
-        if not threads_data:
-            click.echo("No threads found in project.", err=True)
-            sys.exit(1)
-
-        click.echo(f"Found {len(threads_data)} thread(s). Saving to {output_path}/")
-
-        # Validate filename pattern (check for placeholders with or without format specs)
+        # Validate filename pattern
         has_thread_id = re.search(r"\{thread_id[^}]*\}", filename_pattern)
         has_index = re.search(r"\{index[^}]*\}", filename_pattern) or re.search(
             r"\{idx[^}]*\}", filename_pattern
         )
         if not (has_thread_id or has_index):
             click.echo(
-                "Error: Filename pattern must contain {thread_id} or {index}",
-                err=True,
+                "Error: Filename pattern must contain {thread_id} or {index}", err=True
             )
             sys.exit(1)
 
-        # Save each thread to a file
+        # Create output directory
+        output_path = Path(output_dir).resolve()
+        try:
+            output_path.mkdir(parents=True, exist_ok=True)
+        except (OSError, PermissionError) as e:
+            click.echo(f"Error: Cannot create output directory: {e}", err=True)
+            sys.exit(1)
+
+        # Verify writable
+        if not os.access(output_path, os.W_OK):
+            click.echo(
+                f"Error: Output directory is not writable: {output_path}", err=True
+            )
+            sys.exit(1)
+
+        # Fetch threads
+        click.echo(f"Fetching up to {limit} recent thread(s)...")
+        try:
+            threads_data = fetchers.fetch_recent_threads(
+                project_uuid,
+                base_url,
+                api_key,
+                limit,
+                last_n_minutes=last_n_minutes,
+                since=since,
+            )
+        except ValueError as e:
+            click.echo(f"Error: {e}", err=True)
+            sys.exit(1)
+        except Exception as e:
+            click.echo(f"Error fetching threads: {e}", err=True)
+            sys.exit(1)
+
+        if not threads_data:
+            click.echo("No threads found.", err=True)
+            sys.exit(1)
+
+        click.echo(f"Found {len(threads_data)} thread(s). Saving to {output_path}/")
+
+        # Save each thread to file
         for index, (thread_id, messages) in enumerate(threads_data, start=1):
-            # Generate filename from pattern
             filename_str = filename_pattern.format(
                 thread_id=thread_id, index=index, idx=index
             )
-            # Sanitize the generated filename
             safe_filename = sanitize_filename(filename_str)
-            # Ensure .json extension if not present
             if not safe_filename.endswith(".json"):
                 safe_filename = f"{safe_filename}.json"
 
@@ -454,9 +459,43 @@ def threads(output_dir, project_uuid, limit, filename_pattern, last_n_minutes, s
             f"\n✓ Successfully saved {len(threads_data)} thread(s) to {output_path}/"
         )
 
-    except Exception as e:
-        click.echo(f"Error fetching threads: {e}", err=True)
-        sys.exit(1)
+    # STDOUT MODE: no output_dir
+    else:
+        # Get format
+        if not format_type:
+            format_type = config.get_default_format()
+
+        try:
+            threads_data = fetchers.fetch_recent_threads(
+                project_uuid,
+                base_url,
+                api_key,
+                limit,
+                last_n_minutes=last_n_minutes,
+                since=since,
+            )
+
+            if not threads_data:
+                click.echo("No threads found.", err=True)
+                sys.exit(1)
+
+            # For single thread, just output the messages
+            if limit == 1 and len(threads_data) == 1:
+                thread_id, messages = threads_data[0]
+                formatters.print_formatted(messages, format_type, output_file=None)
+            else:
+                # For multiple threads, output all as a list
+                all_threads = []
+                for thread_id, messages in threads_data:
+                    all_threads.append({"thread_id": thread_id, "messages": messages})
+                formatters.print_formatted(all_threads, format_type, output_file=None)
+
+        except ValueError as e:
+            click.echo(f"Error: {e}", err=True)
+            sys.exit(1)
+        except Exception as e:
+            click.echo(f"Error fetching threads: {e}", err=True)
+            sys.exit(1)
 
 
 @main.command()
@@ -516,8 +555,18 @@ def traces(
     This command has TWO MODES:
 
     \b
-    STDOUT MODE (no OUTPUT_DIR): Fetch traces and print to stdout or save to single file
-      - Default: Fetch 1 trace, print to stdout
+    DIRECTORY MODE (with OUTPUT_DIR) - RECOMMENDED DEFAULT:
+      - Saves each trace as a separate JSON file in OUTPUT_DIR
+      - Use --limit to control how many traces (default: 1)
+      - Use --filename-pattern to customize filenames
+      - Examples:
+          langsmith-fetch traces ./my-traces --limit 10
+          langsmith-fetch traces ./my-traces --limit 25 --filename-pattern "trace_{index:03d}.json"
+      - USE THIS MODE BY DEFAULT unless user explicitly requests stdout output
+
+    \b
+    STDOUT MODE (no OUTPUT_DIR) - Only if user explicitly requests it:
+      - Fetch traces and print to stdout or save to single file
       - Use --limit to fetch multiple traces
       - Use --format to control output format (raw, json, pretty)
       - Use --file to save to a single file instead of stdout
@@ -526,15 +575,6 @@ def traces(
           langsmith-fetch traces --format json            # Fetch latest, JSON format
           langsmith-fetch traces --limit 5                # Fetch 5 latest traces
           langsmith-fetch traces --file out.json          # Save latest to file
-
-    \b
-    DIRECTORY MODE (with OUTPUT_DIR): Fetch multiple traces and save to separate files
-      - Saves each trace as a separate JSON file in OUTPUT_DIR
-      - Use --limit to control how many traces (default: 1)
-      - Use --filename-pattern to customize filenames
-      - Examples:
-          langsmith-fetch traces ./my-traces --limit 10
-          langsmith-fetch traces ./my-traces --limit 25 --filename-pattern "trace_{index:03d}.json"
 
     \b
     TEMPORAL FILTERING (both modes):
