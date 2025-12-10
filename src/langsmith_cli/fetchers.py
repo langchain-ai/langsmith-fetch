@@ -83,7 +83,12 @@ def fetch_trace(trace_id: str, *, base_url: str, api_key: str) -> list[dict[str,
 
 
 def fetch_recent_threads(
-    project_uuid: str, base_url: str, api_key: str, limit: int = 10
+    project_uuid: str,
+    base_url: str,
+    api_key: str,
+    limit: int = 10,
+    last_n_minutes: int | None = None,
+    since: str | None = None,
 ) -> list[tuple[str, list[dict[str, Any]]]]:
     """
     Fetch recent threads for a project.
@@ -93,6 +98,10 @@ def fetch_recent_threads(
         base_url: LangSmith base URL
         api_key: LangSmith API key
         limit: Maximum number of threads to return (default: 10)
+        last_n_minutes: Optional time window to limit search. Only returns threads
+            from the last N minutes. Mutually exclusive with `since`.
+        since: Optional ISO timestamp string (e.g., "2025-12-09T10:00:00Z").
+            Only returns threads since this time. Mutually exclusive with `last_n_minutes`.
 
     Returns:
         List of tuples (thread_id, messages) for each thread
@@ -100,11 +109,23 @@ def fetch_recent_threads(
     Raises:
         requests.HTTPError: If the API request fails
     """
+    from datetime import datetime, timedelta, timezone
+
     headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
 
     # Query for root runs in the project
     url = f"{base_url}/runs/query"
     body = {"session": [project_uuid], "is_root": True}
+
+    # Add time filtering if specified
+    if last_n_minutes is not None:
+        start_time = datetime.now(timezone.utc) - timedelta(minutes=last_n_minutes)
+        body["start_time"] = start_time.isoformat()
+    elif since is not None:
+        # Parse ISO timestamp (handle both 'Z' and explicit timezone)
+        since_clean = since.replace("Z", "+00:00")
+        start_time = datetime.fromisoformat(since_clean)
+        body["start_time"] = start_time.isoformat()
 
     response = requests.post(url, headers=headers, data=json.dumps(body))
 
@@ -218,3 +239,109 @@ def fetch_latest_trace(
 
     # Reuse existing fetch_trace to get full messages
     return fetch_trace(trace_id, base_url=base_url, api_key=api_key)
+
+
+def fetch_recent_traces(
+    api_key: str,
+    base_url: str,
+    limit: int = 1,
+    project_uuid: str | None = None,
+    last_n_minutes: int | None = None,
+    since: str | None = None,
+) -> list[tuple[str, list[dict[str, Any]]]]:
+    """Fetch multiple recent traces from LangSmith.
+
+    Searches for recent root traces by chronological timestamp and returns
+    their messages. Similar to fetch_latest_trace but supports multiple traces.
+
+    Args:
+        api_key: LangSmith API key for authentication
+        base_url: LangSmith base URL (e.g., https://api.smith.langchain.com)
+        limit: Maximum number of traces to fetch (default: 1)
+        project_uuid: Optional project UUID to filter traces to a specific project.
+            If not provided, searches across all projects.
+        last_n_minutes: Optional time window to limit search. Only returns traces
+            from the last N minutes. Mutually exclusive with `since`.
+        since: Optional ISO timestamp string (e.g., "2025-12-09T10:00:00Z").
+            Only returns traces since this time. Mutually exclusive with `last_n_minutes`.
+
+    Returns:
+        List of tuples (trace_id, messages) for each trace, ordered by most recent first.
+        Each messages list contains message dictionaries from that trace.
+
+    Raises:
+        ValueError: If no traces found matching the criteria
+        Exception: If API request fails or langsmith package not installed
+
+    Example:
+        >>> traces = fetch_recent_traces(
+        ...     api_key="lsv2_...",
+        ...     base_url="https://api.smith.langchain.com",
+        ...     limit=5,
+        ...     project_uuid="80f1ecb3-a16b-411e-97ae-1c89adbb5c49",
+        ...     last_n_minutes=30
+        ... )
+        >>> for trace_id, messages in traces:
+        ...     print(f"Trace {trace_id}: {len(messages)} messages")
+    """
+    if not HAS_LANGSMITH:
+        raise Exception(
+            "langsmith package required for fetching multiple traces. "
+            "Install with: pip install langsmith"
+        )
+
+    from datetime import datetime, timedelta, timezone
+
+    from langsmith import Client
+
+    # Initialize client
+    client = Client(api_key=api_key)
+
+    # Build filter parameters
+    filter_params = {
+        "is_root": True,
+        "limit": limit,
+    }
+
+    if project_uuid is not None:
+        filter_params["project_id"] = project_uuid
+
+    # Add time filtering
+    if last_n_minutes is not None:
+        start_time = datetime.now(timezone.utc) - timedelta(minutes=last_n_minutes)
+        filter_params["start_time"] = start_time
+    elif since is not None:
+        # Parse ISO timestamp (handle both 'Z' and explicit timezone)
+        since_clean = since.replace("Z", "+00:00")
+        start_time = datetime.fromisoformat(since_clean)
+        filter_params["start_time"] = start_time
+
+    # Fetch runs
+    runs = list(client.list_runs(**filter_params))
+
+    if not runs:
+        raise ValueError("No traces found matching criteria")
+
+    # Fetch messages for each trace
+    results = []
+    for run in runs:
+        trace_id = str(run.id)
+        try:
+            messages = fetch_trace(trace_id, base_url=base_url, api_key=api_key)
+            results.append((trace_id, messages))
+        except Exception as e:
+            # Log error but continue with other traces
+            import sys
+
+            print(
+                f"Warning: Failed to fetch trace {trace_id}: {e}",
+                file=sys.stderr,
+            )
+            continue
+
+    if not results:
+        raise ValueError(
+            f"Successfully queried {len(runs)} traces but failed to fetch messages for all of them"
+        )
+
+    return results

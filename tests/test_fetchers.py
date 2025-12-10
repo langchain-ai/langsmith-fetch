@@ -1,5 +1,6 @@
 """Tests for fetchers module."""
 
+import json
 from datetime import datetime
 from unittest.mock import Mock, patch
 
@@ -350,6 +351,173 @@ class TestFetchLatestTrace:
         assert isinstance(messages, list)
 
 
+class TestFetchRecentTraces:
+    """Tests for fetch_recent_traces function."""
+
+    @responses.activate
+    @patch("langsmith.Client")
+    def test_fetch_recent_traces_success(self, mock_client_class, sample_trace_response):
+        """Test successful recent traces fetching."""
+        # Mock the Client and its list_runs method
+        mock_client = Mock()
+        mock_run1 = Mock()
+        mock_run1.id = "trace-id-1"
+        mock_run2 = Mock()
+        mock_run2.id = "trace-id-2"
+        mock_client.list_runs.return_value = [mock_run1, mock_run2]
+        mock_client_class.return_value = mock_client
+
+        # Mock the REST API calls for fetch_trace
+        responses.add(
+            responses.GET,
+            f"https://api.smith.langchain.com/runs/trace-id-1",
+            json=sample_trace_response,
+            status=200,
+        )
+        responses.add(
+            responses.GET,
+            f"https://api.smith.langchain.com/runs/trace-id-2",
+            json=sample_trace_response,
+            status=200,
+        )
+
+        traces_data = fetchers.fetch_recent_traces(
+            api_key=TEST_API_KEY, base_url=TEST_BASE_URL, limit=2
+        )
+
+        # Verify Client was instantiated with correct API key
+        mock_client_class.assert_called_once_with(api_key=TEST_API_KEY)
+
+        # Verify list_runs was called with correct parameters
+        mock_client.list_runs.assert_called_once()
+        call_kwargs = mock_client.list_runs.call_args[1]
+        assert call_kwargs["is_root"] is True
+        assert call_kwargs["limit"] == 2
+
+        # Verify the traces were fetched correctly
+        assert isinstance(traces_data, list)
+        assert len(traces_data) == 2
+        assert traces_data[0][0] == "trace-id-1"
+        assert traces_data[1][0] == "trace-id-2"
+        assert isinstance(traces_data[0][1], list)  # messages
+        assert isinstance(traces_data[1][1], list)  # messages
+
+    @patch("langsmith.Client")
+    def test_fetch_recent_traces_no_traces_found(self, mock_client_class):
+        """Test fetch_recent_traces when no traces are found."""
+        # Mock empty list_runs result
+        mock_client = Mock()
+        mock_client.list_runs.return_value = []
+        mock_client_class.return_value = mock_client
+
+        with pytest.raises(ValueError, match="No traces found matching criteria"):
+            fetchers.fetch_recent_traces(api_key=TEST_API_KEY, base_url=TEST_BASE_URL)
+
+    @responses.activate
+    @patch("langsmith.Client")
+    def test_fetch_recent_traces_with_project_uuid(
+        self, mock_client_class, sample_trace_response
+    ):
+        """Test recent traces fetching with project UUID filter."""
+        # Mock the Client
+        mock_client = Mock()
+        mock_run = Mock()
+        mock_run.id = TEST_TRACE_ID
+        mock_client.list_runs.return_value = [mock_run]
+        mock_client_class.return_value = mock_client
+
+        # Mock the REST API call
+        responses.add(
+            responses.GET,
+            f"https://api.smith.langchain.com/runs/{TEST_TRACE_ID}",
+            json=sample_trace_response,
+            status=200,
+        )
+
+        traces_data = fetchers.fetch_recent_traces(
+            api_key=TEST_API_KEY,
+            base_url=TEST_BASE_URL,
+            limit=1,
+            project_uuid=TEST_PROJECT_UUID,
+        )
+
+        # Verify list_runs was called with project_id
+        call_kwargs = mock_client.list_runs.call_args[1]
+        assert call_kwargs["project_id"] == TEST_PROJECT_UUID
+        assert call_kwargs["is_root"] is True
+        assert call_kwargs["limit"] == 1
+
+        assert isinstance(traces_data, list)
+        assert len(traces_data) == 1
+
+    @responses.activate
+    @patch("langsmith.Client")
+    def test_fetch_recent_traces_with_time_window(
+        self, mock_client_class, sample_trace_response
+    ):
+        """Test recent traces fetching with last_n_minutes filter."""
+        # Mock the Client
+        mock_client = Mock()
+        mock_run = Mock()
+        mock_run.id = TEST_TRACE_ID
+        mock_client.list_runs.return_value = [mock_run]
+        mock_client_class.return_value = mock_client
+
+        # Mock the REST API call
+        responses.add(
+            responses.GET,
+            f"https://api.smith.langchain.com/runs/{TEST_TRACE_ID}",
+            json=sample_trace_response,
+            status=200,
+        )
+
+        traces_data = fetchers.fetch_recent_traces(
+            api_key=TEST_API_KEY, base_url=TEST_BASE_URL, last_n_minutes=30
+        )
+
+        # Verify list_runs was called with start_time
+        call_kwargs = mock_client.list_runs.call_args[1]
+        assert "start_time" in call_kwargs
+        assert isinstance(call_kwargs["start_time"], datetime)
+        assert call_kwargs["is_root"] is True
+
+        assert isinstance(traces_data, list)
+
+    @responses.activate
+    @patch("langsmith.Client")
+    def test_fetch_recent_traces_with_since_timestamp(
+        self, mock_client_class, sample_trace_response
+    ):
+        """Test recent traces fetching with since timestamp filter."""
+        # Mock the Client
+        mock_client = Mock()
+        mock_run = Mock()
+        mock_run.id = TEST_TRACE_ID
+        mock_client.list_runs.return_value = [mock_run]
+        mock_client_class.return_value = mock_client
+
+        # Mock the REST API call
+        responses.add(
+            responses.GET,
+            f"https://api.smith.langchain.com/runs/{TEST_TRACE_ID}",
+            json=sample_trace_response,
+            status=200,
+        )
+
+        since_timestamp = "2025-12-09T10:00:00Z"
+        traces_data = fetchers.fetch_recent_traces(
+            api_key=TEST_API_KEY, base_url=TEST_BASE_URL, since=since_timestamp
+        )
+
+        # Verify list_runs was called with start_time
+        call_kwargs = mock_client.list_runs.call_args[1]
+        assert "start_time" in call_kwargs
+        assert isinstance(call_kwargs["start_time"], datetime)
+        assert call_kwargs["is_root"] is True
+
+        assert isinstance(traces_data, list)
+
+
 class TestFetchRecentThreads:
     """Tests for fetch_recent_threads function."""
 
@@ -524,3 +692,77 @@ class TestFetchRecentThreads:
         # Should only have one result even though thread-1 appeared twice
         assert len(results) == 1
         assert results[0][0] == "thread-1"
+
+    @responses.activate
+    def test_fetch_recent_threads_with_last_n_minutes(self, sample_thread_response):
+        """Test that temporal filter last_n_minutes is passed to API."""
+        responses.add(
+            responses.POST,
+            f"{TEST_BASE_URL}/runs/query",
+            json={
+                "runs": [
+                    {
+                        "id": "run-1",
+                        "start_time": "2024-01-02T00:00:00Z",
+                        "extra": {"metadata": {"thread_id": "thread-1"}},
+                    }
+                ]
+            },
+            status=200,
+        )
+
+        responses.add(
+            responses.GET,
+            f"{TEST_BASE_URL}/runs/threads/thread-1",
+            json=sample_thread_response,
+            status=200,
+        )
+
+        results = fetchers.fetch_recent_threads(
+            TEST_PROJECT_UUID, TEST_BASE_URL, TEST_API_KEY, limit=10, last_n_minutes=30
+        )
+
+        # Verify the request was made with start_time in body
+        assert len(responses.calls) == 2
+        request_body = json.loads(responses.calls[0].request.body)
+        assert "start_time" in request_body
+        assert len(results) == 1
+
+    @responses.activate
+    def test_fetch_recent_threads_with_since(self, sample_thread_response):
+        """Test that temporal filter since is passed to API."""
+        responses.add(
+            responses.POST,
+            f"{TEST_BASE_URL}/runs/query",
+            json={
+                "runs": [
+                    {
+                        "id": "run-1",
+                        "start_time": "2024-01-02T00:00:00Z",
+                        "extra": {"metadata": {"thread_id": "thread-1"}},
+                    }
+                ]
+            },
+            status=200,
+        )
+
+        responses.add(
+            responses.GET,
+            f"{TEST_BASE_URL}/runs/threads/thread-1",
+            json=sample_thread_response,
+            status=200,
+        )
+
+        results = fetchers.fetch_recent_threads(
+            TEST_PROJECT_UUID,
+            TEST_BASE_URL,
+            TEST_API_KEY,
+            limit=10,
+            since="2025-12-09T10:00:00Z",
+        )
+
+        # Verify the request was made with start_time in body
+        assert len(responses.calls) == 2
+        request_body = json.loads(responses.calls[0].request.body)
+        assert "start_time" in request_body
+        assert len(results) == 1

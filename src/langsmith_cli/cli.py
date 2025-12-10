@@ -280,7 +280,18 @@ def trace(trace_id, format_type, output_file):
     default="{thread_id}.json",
     help="Filename pattern for saved threads. Use {thread_id} for thread ID, {index} for sequential number (default: {thread_id}.json)",
 )
-def threads(output_dir, project_uuid, limit, filename_pattern):
+@click.option(
+    "--last-n-minutes",
+    type=int,
+    metavar="N",
+    help="Only search threads from the last N minutes",
+)
+@click.option(
+    "--since",
+    metavar="TIMESTAMP",
+    help="Only search threads since ISO timestamp (e.g., 2025-12-09T10:00:00Z)",
+)
+def threads(output_dir, project_uuid, limit, filename_pattern, last_n_minutes, since):
     """Fetch recent threads for a project and save to files (BULK OPERATION).
 
     This command is designed for bulk operations where you need multiple threads
@@ -329,12 +340,27 @@ def threads(output_dir, project_uuid, limit, filename_pattern):
       langsmith-fetch threads ./my-threads --project-uuid 80f1ecb3-a16b-411e-97ae-1c89adbb5c49
 
     \b
+    TEMPORAL FILTERING:
+      - --last-n-minutes N: Only fetch threads from last N minutes
+      - --since TIMESTAMP: Only fetch threads since specific time
+      - Examples:
+          langsmith-fetch threads ./my-threads --last-n-minutes 60
+          langsmith-fetch threads ./my-threads --since 2025-12-09T10:00:00Z
+
+    \b
     PREREQUISITES:
       - LANGSMITH_API_KEY environment variable must be set, or
         API key stored via: langsmith-fetch config set api-key <key>
       - Project UUID must be set via: langsmith-fetch config set project-uuid <uuid>
         or provided with --project-uuid option
     """
+
+    # Validate mutually exclusive options
+    if last_n_minutes is not None and since is not None:
+        click.echo(
+            "Error: --last-n-minutes and --since are mutually exclusive", err=True
+        )
+        sys.exit(1)
 
     # Get API key and base URL
     base_url = config.get_base_url()
@@ -377,7 +403,12 @@ def threads(output_dir, project_uuid, limit, filename_pattern):
 
         # Fetch recent threads
         threads_data = fetchers.fetch_recent_threads(
-            project_uuid, base_url, api_key, limit
+            project_uuid,
+            base_url,
+            api_key,
+            limit,
+            last_n_minutes=last_n_minutes,
+            since=since,
         )
 
         if not threads_data:
@@ -565,6 +596,291 @@ def latest(project_uuid, format_type, last_n_minutes, since, output_file):
     except Exception as e:
         click.echo(f"Error fetching latest trace: {e}", err=True)
         sys.exit(1)
+
+
+@main.command()
+@click.argument("output_dir", type=click.Path(), required=False, metavar="[OUTPUT_DIR]")
+@click.option(
+    "--project-uuid",
+    metavar="UUID",
+    help="LangSmith project UUID (overrides config). Find in UI or via trace session_id.",
+)
+@click.option(
+    "--limit",
+    "-n",
+    type=int,
+    default=1,
+    help="Maximum number of traces to fetch (default: 1)",
+)
+@click.option(
+    "--last-n-minutes",
+    type=int,
+    metavar="N",
+    help="Only search traces from the last N minutes",
+)
+@click.option(
+    "--since",
+    metavar="TIMESTAMP",
+    help="Only search traces since ISO timestamp (e.g., 2025-12-09T10:00:00Z)",
+)
+@click.option(
+    "--filename-pattern",
+    default="{trace_id}.json",
+    help="Filename pattern for saved traces (directory mode only). Use {trace_id} for ID, {index} for sequential number (default: {trace_id}.json)",
+)
+@click.option(
+    "--format",
+    "format_type",
+    type=click.Choice(["raw", "json", "pretty"]),
+    help="Output format: raw (compact JSON), json (pretty JSON), pretty (human-readable panels)",
+)
+@click.option(
+    "--file",
+    "output_file",
+    metavar="PATH",
+    help="Save output to file instead of stdout (stdout mode only)",
+)
+def traces(
+    output_dir,
+    project_uuid,
+    limit,
+    last_n_minutes,
+    since,
+    filename_pattern,
+    format_type,
+    output_file,
+):
+    """Fetch recent traces from LangSmith BY CHRONOLOGICAL TIME.
+
+    This command has TWO MODES:
+
+    \b
+    STDOUT MODE (no OUTPUT_DIR): Fetch traces and print to stdout or save to single file
+      - Default: Fetch 1 trace, print to stdout
+      - Use --limit to fetch multiple traces
+      - Use --format to control output format (raw, json, pretty)
+      - Use --file to save to a single file instead of stdout
+      - Examples:
+          langsmith-fetch traces                          # Fetch latest trace, pretty format
+          langsmith-fetch traces --format json            # Fetch latest, JSON format
+          langsmith-fetch traces --limit 5                # Fetch 5 latest traces
+          langsmith-fetch traces --file out.json          # Save latest to file
+
+    \b
+    DIRECTORY MODE (with OUTPUT_DIR): Fetch multiple traces and save to separate files
+      - Saves each trace as a separate JSON file in OUTPUT_DIR
+      - Use --limit to control how many traces (default: 1)
+      - Use --filename-pattern to customize filenames
+      - Examples:
+          langsmith-fetch traces ./my-traces --limit 10
+          langsmith-fetch traces ./my-traces --limit 25 --filename-pattern "trace_{index:03d}.json"
+
+    \b
+    TEMPORAL FILTERING (both modes):
+      - --last-n-minutes N: Only fetch traces from last N minutes
+      - --since TIMESTAMP: Only fetch traces since specific time
+      - Examples:
+          langsmith-fetch traces --last-n-minutes 30
+          langsmith-fetch traces --since 2025-12-09T10:00:00Z
+          langsmith-fetch traces ./dir --limit 10 --last-n-minutes 60
+
+    \b
+    IMPORTANT:
+      - Fetches traces by chronological timestamp (most recent first)
+      - Always use --project-uuid to target specific project (or set via config)
+      - Without --project-uuid, searches ALL projects (may return unexpected results)
+
+    \b
+    PREREQUISITES:
+      - LANGSMITH_API_KEY environment variable or stored in config
+      - Optional: Project UUID for filtering (recommended)
+    """
+    from rich.console import Console
+
+    console = Console()
+
+    # Validate mutually exclusive options
+    if last_n_minutes is not None and since is not None:
+        click.echo(
+            "Error: --last-n-minutes and --since are mutually exclusive", err=True
+        )
+        sys.exit(1)
+
+    # Get API key and base URL
+    base_url = config.get_base_url()
+    api_key = config.get_api_key()
+    if not api_key:
+        click.echo(
+            "Error: LANGSMITH_API_KEY not found in environment or config", err=True
+        )
+        sys.exit(1)
+
+    # Get project UUID from config if not provided
+    if not project_uuid:
+        project_uuid = config.get_project_uuid()
+
+    # DIRECTORY MODE: output_dir provided
+    if output_dir:
+        # Validate incompatible options
+        if format_type:
+            click.echo(
+                "Warning: --format ignored in directory mode (files are always JSON)",
+                err=True,
+            )
+        if output_file:
+            click.echo("Warning: --file ignored in directory mode", err=True)
+
+        # Validate filename pattern
+        has_trace_id = re.search(r"\{trace_id[^}]*\}", filename_pattern)
+        has_index = re.search(r"\{index[^}]*\}", filename_pattern) or re.search(
+            r"\{idx[^}]*\}", filename_pattern
+        )
+        if not (has_trace_id or has_index):
+            click.echo(
+                "Error: Filename pattern must contain {trace_id} or {index}", err=True
+            )
+            sys.exit(1)
+
+        # Create output directory
+        output_path = Path(output_dir).resolve()
+        try:
+            output_path.mkdir(parents=True, exist_ok=True)
+        except (OSError, PermissionError) as e:
+            click.echo(f"Error: Cannot create output directory: {e}", err=True)
+            sys.exit(1)
+
+        # Verify writable
+        if not os.access(output_path, os.W_OK):
+            click.echo(
+                f"Error: Output directory is not writable: {output_path}", err=True
+            )
+            sys.exit(1)
+
+        # Fetch traces
+        click.echo(f"Fetching up to {limit} recent trace(s)...")
+        try:
+            traces_data = fetchers.fetch_recent_traces(
+                api_key=api_key,
+                base_url=base_url,
+                limit=limit,
+                project_uuid=project_uuid,
+                last_n_minutes=last_n_minutes,
+                since=since,
+            )
+        except ValueError as e:
+            click.echo(f"Error: {e}", err=True)
+            sys.exit(1)
+        except Exception as e:
+            click.echo(f"Error fetching traces: {e}", err=True)
+            sys.exit(1)
+
+        click.echo(f"Found {len(traces_data)} trace(s). Saving to {output_path}/")
+
+        # Save each trace to file
+        for index, (trace_id, messages) in enumerate(traces_data, start=1):
+            filename_str = filename_pattern.format(
+                trace_id=trace_id, index=index, idx=index
+            )
+            safe_filename = sanitize_filename(filename_str)
+            if not safe_filename.endswith(".json"):
+                safe_filename = f"{safe_filename}.json"
+
+            filename = output_path / safe_filename
+            with open(filename, "w") as f:
+                json.dump(messages, f, indent=2, default=str)
+            click.echo(
+                f"  ✓ Saved {trace_id} to {safe_filename} ({len(messages)} messages)"
+            )
+
+        click.echo(
+            f"\n✓ Successfully saved {len(traces_data)} trace(s) to {output_path}/"
+        )
+
+    # STDOUT MODE: no output_dir
+    else:
+        # Get format
+        if not format_type:
+            format_type = config.get_default_format()
+
+        # For limit=1, use optimized single-trace fetch (backward compatible with latest)
+        if limit == 1:
+            try:
+                messages = fetchers.fetch_latest_trace(
+                    api_key=api_key,
+                    base_url=base_url,
+                    project_uuid=project_uuid,
+                    last_n_minutes=last_n_minutes,
+                    since=since,
+                )
+
+                # Output to file or stdout
+                if output_file:
+                    with open(output_file, "w") as f:
+                        if format_type == "raw":
+                            json.dump(messages, f)
+                        else:
+                            json.dump(messages, f, indent=2)
+                    click.echo(f"Saved trace to {output_file}")
+                else:
+                    formatters.print_formatted(messages, format_type, None)
+
+            except ValueError as e:
+                click.echo(f"Error: {e}", err=True)
+                sys.exit(1)
+            except Exception as e:
+                click.echo(f"Error fetching trace: {e}", err=True)
+                sys.exit(1)
+
+        # For limit>1, fetch multiple and output as array
+        else:
+            try:
+                traces_data = fetchers.fetch_recent_traces(
+                    api_key=api_key,
+                    base_url=base_url,
+                    limit=limit,
+                    project_uuid=project_uuid,
+                    last_n_minutes=last_n_minutes,
+                    since=since,
+                )
+
+                # Format output as array of trace objects
+                output_data = [
+                    {"trace_id": trace_id, "messages": messages}
+                    for trace_id, messages in traces_data
+                ]
+
+                # Output to file or stdout
+                if output_file:
+                    with open(output_file, "w") as f:
+                        if format_type == "raw":
+                            json.dump(output_data, f)
+                        else:
+                            json.dump(output_data, f, indent=2)
+                    click.echo(f"Saved {len(traces_data)} trace(s) to {output_file}")
+                else:
+                    if format_type == "raw":
+                        click.echo(json.dumps(output_data))
+                    elif format_type == "json":
+                        from rich.syntax import Syntax
+
+                        json_str = json.dumps(output_data, indent=2)
+                        syntax = Syntax(
+                            json_str, "json", theme="monokai", line_numbers=False
+                        )
+                        console.print(syntax)
+                    else:  # pretty
+                        for trace_id, messages in traces_data:
+                            click.echo(f"\n{'=' * 60}")
+                            click.echo(f"Trace: {trace_id}")
+                            click.echo("=" * 60)
+                            formatters.print_formatted(messages, "pretty", None)
+
+            except ValueError as e:
+                click.echo(f"Error: {e}", err=True)
+                sys.exit(1)
+            except Exception as e:
+                click.echo(f"Error fetching traces: {e}", err=True)
+                sys.exit(1)
 
 
 @main.group()
