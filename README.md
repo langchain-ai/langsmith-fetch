@@ -274,7 +274,18 @@ langsmith-fetch traces ./my-traces --limit 20 --last-n-minutes 60
 
 # Fetch traces since a specific time
 langsmith-fetch traces ./my-traces --limit 10 --since 2025-12-09T10:00:00Z
+
+# Control concurrent fetching (default: 5 workers)
+langsmith-fetch traces ./my-traces --limit 20 --max-concurrent 10
+
+# Disable progress bar
+langsmith-fetch traces ./my-traces --limit 10 --no-progress
 ```
+
+**Performance Options:**
+- `--max-concurrent INTEGER`: Control concurrent trace fetches (default: 5, max recommended: 10)
+- `--no-progress`: Disable progress bar display during fetch
+- Timing information is always displayed by default
 
 **File Naming (directory mode):**
 - Default: Files named by trace ID (e.g., `3b0b15fe-1e3a-4aef-afa8-48df15879cfe.json`)
