@@ -292,7 +292,7 @@ class TestProjectLookup:
         mock_project.name = "test-project"
 
         mock_client = MagicMock()
-        mock_client.list_projects.return_value = [mock_project]
+        mock_client.read_project.return_value = mock_project
 
         with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
             with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
@@ -301,21 +301,17 @@ class TestProjectLookup:
 
                     result = get_project_uuid()
                     assert result == "looked-up-uuid"
-                    mock_client.list_projects.assert_called_once()
+                    mock_client.read_project.assert_called_once_with(project_name="test-project")
 
     def test_lookup_project_uuid_no_match(self, temp_config_dir, monkeypatch):
-        """Test error handling when no project matches."""
-        from unittest.mock import Mock, MagicMock
+        """Test error handling when project not found."""
+        from unittest.mock import MagicMock
 
         monkeypatch.setenv("LANGSMITH_PROJECT", "nonexistent")
         monkeypatch.setenv("LANGSMITH_API_KEY", TEST_API_KEY)
 
-        mock_project = Mock()
-        mock_project.id = "other-uuid"
-        mock_project.name = "other-project"
-
         mock_client = MagicMock()
-        mock_client.list_projects.return_value = [mock_project]
+        mock_client.read_project.side_effect = Exception("Project not found")
 
         with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
             with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
@@ -323,33 +319,6 @@ class TestProjectLookup:
                     from langsmith_cli.config import get_project_uuid
 
                     # Should return None and print error to stderr
-                    result = get_project_uuid()
-                    assert result is None
-
-    def test_lookup_project_uuid_multiple_matches(self, temp_config_dir, monkeypatch):
-        """Test error handling when multiple projects match."""
-        from unittest.mock import Mock, MagicMock
-
-        monkeypatch.setenv("LANGSMITH_PROJECT", "test")
-        monkeypatch.setenv("LANGSMITH_API_KEY", TEST_API_KEY)
-
-        mock_project1 = Mock()
-        mock_project1.id = "uuid1"
-        mock_project1.name = "test-project-1"
-
-        mock_project2 = Mock()
-        mock_project2.id = "uuid2"
-        mock_project2.name = "test-project-2"
-
-        mock_client = MagicMock()
-        mock_client.list_projects.return_value = [mock_project1, mock_project2]
-
-        with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
-            with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
-                with patch("langsmith.Client", return_value=mock_client):
-                    from langsmith_cli.config import get_project_uuid
-
-                    # Should return None and print error listing matches
                     result = get_project_uuid()
                     assert result is None
 
@@ -365,7 +334,7 @@ class TestProjectLookup:
         mock_project.name = "cached-project"
 
         mock_client = MagicMock()
-        mock_client.list_projects.return_value = [mock_project]
+        mock_client.read_project.return_value = mock_project
 
         with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
             with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
@@ -378,12 +347,12 @@ class TestProjectLookup:
                     # First call should hit API
                     result1 = get_project_uuid()
                     assert result1 == "cached-uuid"
-                    assert mock_client.list_projects.call_count == 1
+                    assert mock_client.read_project.call_count == 1
 
                     # Second call should use cache
                     result2 = get_project_uuid()
                     assert result2 == "cached-uuid"
-                    assert mock_client.list_projects.call_count == 1  # Still 1
+                    assert mock_client.read_project.call_count == 1  # Still 1
 
     def test_lookup_no_api_key(self, temp_config_dir, monkeypatch):
         """Test graceful handling when API key is missing."""

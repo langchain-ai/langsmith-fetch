@@ -95,45 +95,23 @@ def _lookup_project_uuid_by_name(
         Project UUID string
 
     Raises:
-        ValueError: If no match, multiple matches, or lookup fails
+        ValueError: If project not found or lookup fails
     """
     from langsmith import Client
 
     # Initialize client
     client = Client(api_key=api_key, api_url=base_url)
 
-    # Fetch projects
+    # Try direct lookup by project name
     try:
-        projects = list(client.list_projects())
+        project = client.read_project(project_name=project_name)
+        return str(project.id)
     except Exception as e:
         raise ValueError(
-            f"Failed to fetch projects from LangSmith API: {e}\n"
-            f"Consider setting LANGSMITH_PROJECT_UUID or using 'langsmith-fetch config set project-uuid <uuid>'."
+            f"Project '{project_name}' not found: {e}\n"
+            f"Use 'langsmith-fetch config set project-uuid <uuid>' to set explicitly, "
+            f"or set LANGSMITH_PROJECT_UUID env var."
         )
-
-    # Find matching projects (case-insensitive partial match)
-    matches = [
-        p for p in projects
-        if project_name.lower() in p.name.lower()
-    ]
-
-    if not matches:
-        available = [p.name for p in projects[:5]]
-        available_str = ', '.join(available) if available else 'none'
-        raise ValueError(
-            f"No project found matching '{project_name}'.\n"
-            f"Available projects (first 5): {available_str}\n"
-            f"Use 'langsmith-fetch config set project-uuid <uuid>' to set explicitly."
-        )
-
-    if len(matches) > 1:
-        match_list = '\n'.join([f"  - {p.name} (UUID: {p.id})" for p in matches])
-        raise ValueError(
-            f"Multiple projects match '{project_name}':\n{match_list}\n"
-            f"Use 'langsmith-fetch config set project-uuid <uuid>' to set explicitly."
-        )
-
-    return str(matches[0].id)
 
 
 def get_api_key() -> str | None:
@@ -214,10 +192,14 @@ def get_project_uuid() -> str | None:
 
         uuid = _lookup_project_uuid_by_name(project_name, api_key, base_url)
 
-        # Cache result
+        # Cache result in-memory
         _project_uuid_cache[project_name] = uuid
 
+        # Persist to config file for future use
+        set_config_value("project_uuid", uuid)
+
         print(f"Found project '{project_name}' (UUID: {uuid})", file=sys.stderr)
+        print(f"Saved project UUID to config file", file=sys.stderr)
 
         return uuid
 
