@@ -66,27 +66,28 @@ def main():
         langsmith-fetch thread <thread-id> --format raw
 
       FETCH MOST RECENT TRACE (by chronological time):
-        langsmith-fetch latest --project-uuid <uuid> --format raw
+        langsmith-fetch traces --project-uuid <uuid> --format raw
         WARNING: Without --project-uuid, searches ALL projects chronologically.
         May not return the trace you expect. Always specify --project-uuid or
         use time filters (--last-n-minutes or --since) to target the right trace.
+
+      BULK FETCH MULTIPLE TRACES (saves to directory):
+        langsmith-fetch traces ./output-folder --limit 10
+        # Creates one JSON file per trace in output-folder/
 
       BULK FETCH MULTIPLE THREADS (saves to directory):
         langsmith-fetch threads ./output-folder --limit 10
         # Creates one JSON file per thread in output-folder/
 
-      The threads command automatically:
-        - Creates the output directory if it doesn't exist
-        - Sanitizes thread IDs for safe filenames
-        - Saves each thread as a separate .json file
-        - Returns error if directory is not writable
-
     WORKFLOW EXAMPLES:
       # Quick inspection (default: pretty format to stdout)
-      langsmith-fetch latest
+      langsmith-fetch traces
 
       # Save for processing (raw JSON to file)
-      langsmith-fetch latest --format raw --file latest.json
+      langsmith-fetch traces --format raw --file latest.json
+
+      # Bulk export (multiple traces to folder)
+      langsmith-fetch traces ./my-traces --limit 10
 
       # Bulk export (multiple threads to folder)
       langsmith-fetch threads ./my-threads --limit 25
@@ -455,153 +456,6 @@ def threads(output_dir, project_uuid, limit, filename_pattern, last_n_minutes, s
 
     except Exception as e:
         click.echo(f"Error fetching threads: {e}", err=True)
-        sys.exit(1)
-
-
-@main.command()
-@click.option(
-    "--project-uuid",
-    metavar="UUID",
-    help="LangSmith project UUID to filter traces (optional, searches all projects if not provided)",
-)
-@click.option(
-    "--format",
-    "format_type",
-    type=click.Choice(["raw", "json", "pretty"]),
-    help="Output format: raw (compact JSON), json (pretty JSON), pretty (human-readable panels)",
-)
-@click.option(
-    "--last-n-minutes",
-    type=int,
-    metavar="N",
-    help="Only search traces from the last N minutes",
-)
-@click.option(
-    "--since",
-    metavar="TIMESTAMP",
-    help="Only search traces since ISO timestamp (e.g., 2025-12-09T10:00:00Z)",
-)
-@click.option(
-    "--file",
-    "output_file",
-    metavar="PATH",
-    help="Save output to file instead of printing to stdout",
-)
-def latest(project_uuid, format_type, last_n_minutes, since, output_file):
-    """Fetch the most recent trace from LangSmith BY CHRONOLOGICAL TIME.
-
-    IMPORTANT: This fetches the trace with the most recent timestamp, not "the trace
-    from my most recent run". Without filters, it searches ALL projects and returns
-    whichever trace has the latest timestamp across your entire LangSmith account.
-
-    RECOMMENDED USAGE: Always specify --project-uuid to target a specific project,
-    or use time filters (--last-n-minutes or --since) to narrow the search.
-
-    \b
-    WHAT THIS DOES:
-      1. Searches for root traces (not child runs) in LangSmith
-      2. Finds the trace with the most recent start_time timestamp
-      3. Returns the messages from that trace
-
-    \b
-    RETURNS:
-      List of messages from the most recent trace, ordered chronologically.
-
-    \b
-    EXAMPLES:
-      # RECOMMENDED: Fetch most recent trace from a specific project
-      langsmith-fetch latest --project-uuid 80f1ecb3-a16b-411e-97ae-1c89adbb5c49
-
-      # Fetch most recent trace from last 30 minutes (any project)
-      langsmith-fetch latest --last-n-minutes 30
-
-      # Fetch most recent trace since a specific time (any project)
-      langsmith-fetch latest --since 2025-12-09T10:00:00Z
-
-      # WARNING: Searches ALL projects - may return unexpected results
-      langsmith-fetch latest
-
-      # Fetch with JSON output format
-      langsmith-fetch latest --project-uuid <uuid> --format json
-
-      # Save to file
-      langsmith-fetch latest --project-uuid <uuid> --file latest.json --format raw
-
-    \b
-    PREREQUISITES:
-      - LANGSMITH_API_KEY environment variable must be set, or
-      - API key stored via: langsmith-fetch config set api-key <key>
-
-    \b
-    OPTIONS:
-      --project-uuid      Filter to search only within a specific project (RECOMMENDED).
-                          Without this, searches ALL projects chronologically.
-
-      --last-n-minutes    Time window to limit search (mutually exclusive with --since)
-
-      --since             ISO timestamp to limit search (mutually exclusive with --last-n-minutes)
-
-      --format            Output format (raw, json, or pretty)
-
-    \b
-    NOTES:
-      - This command fetches TRACES only (not threads)
-      - Searches for root traces only (not child runs)
-      - Returns the trace with the latest timestamp (chronologically most recent)
-      - To fetch a specific trace by ID, use: langsmith-fetch trace <trace-id>
-      - To fetch a specific thread by ID, use: langsmith-fetch thread <thread-id>
-    """
-
-    # Deprecation warning
-    click.echo(
-        "Warning: The 'latest' command is deprecated. Use 'langsmith-fetch traces' instead.",
-        err=True,
-    )
-
-    # Validate mutually exclusive time filters
-    if last_n_minutes is not None and since is not None:
-        click.echo(
-            "Error: --last-n-minutes and --since are mutually exclusive", err=True
-        )
-        sys.exit(1)
-
-    # Get API key and base URL
-    base_url = config.get_base_url()
-    api_key = config.get_api_key()
-    if not api_key:
-        click.echo(
-            "Error: LANGSMITH_API_KEY not found in environment or config", err=True
-        )
-        sys.exit(1)
-
-    # Get project UUID (from option or config, but it's optional)
-    if not project_uuid:
-        project_uuid = config.get_project_uuid()
-    # Note: project_uuid can be None, which means search all projects
-
-    # Get format (from option or config)
-    if not format_type:
-        format_type = config.get_default_format()
-
-    try:
-        # Fetch latest trace
-        messages = fetchers.fetch_latest_trace(
-            api_key=api_key,
-            base_url=base_url,
-            project_uuid=project_uuid,
-            last_n_minutes=last_n_minutes,
-            since=since,
-        )
-
-        # Output
-        formatters.print_formatted(messages, format_type, output_file)
-
-    except ValueError as e:
-        # Handle "No traces found" case
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
-    except Exception as e:
-        click.echo(f"Error fetching latest trace: {e}", err=True)
         sys.exit(1)
 
 

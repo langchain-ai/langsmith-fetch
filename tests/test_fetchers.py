@@ -356,7 +356,9 @@ class TestFetchRecentTraces:
 
     @responses.activate
     @patch("langsmith.Client")
-    def test_fetch_recent_traces_success(self, mock_client_class, sample_trace_response):
+    def test_fetch_recent_traces_success(
+        self, mock_client_class, sample_trace_response
+    ):
         """Test successful recent traces fetching."""
         # Mock the Client and its list_runs method
         mock_client = Mock()
@@ -370,13 +372,13 @@ class TestFetchRecentTraces:
         # Mock the REST API calls for fetch_trace
         responses.add(
             responses.GET,
-            f"https://api.smith.langchain.com/runs/trace-id-1",
+            "https://api.smith.langchain.com/runs/trace-id-1",
             json=sample_trace_response,
             status=200,
         )
         responses.add(
             responses.GET,
-            f"https://api.smith.langchain.com/runs/trace-id-2",
+            "https://api.smith.langchain.com/runs/trace-id-2",
             json=sample_trace_response,
             status=200,
         )
