@@ -540,6 +540,18 @@ def threads(
     metavar="PATH",
     help="Save output to file instead of stdout (stdout mode only)",
 )
+@click.option(
+    "--no-progress",
+    is_flag=True,
+    default=False,
+    help="Disable progress bar display during fetch",
+)
+@click.option(
+    "--max-concurrent",
+    type=int,
+    default=5,
+    help="Maximum concurrent trace fetches (default: 5, max recommended: 10)",
+)
 def traces(
     output_dir,
     project_uuid,
@@ -549,6 +561,8 @@ def traces(
     filename_pattern,
     format_type,
     output_file,
+    no_progress,
+    max_concurrent,
 ):
     """Fetch recent traces from LangSmith BY CHRONOLOGICAL TIME.
 
@@ -660,13 +674,16 @@ def traces(
         # Fetch traces
         click.echo(f"Fetching up to {limit} recent trace(s)...")
         try:
-            traces_data = fetchers.fetch_recent_traces(
+            traces_data, timing_info = fetchers.fetch_recent_traces(
                 api_key=api_key,
                 base_url=base_url,
                 limit=limit,
                 project_uuid=project_uuid,
                 last_n_minutes=last_n_minutes,
                 since=since,
+                max_workers=max_concurrent,
+                show_progress=not no_progress,
+                return_timing=True,
             )
         except ValueError as e:
             click.echo(f"Error: {e}", err=True)
@@ -675,7 +692,14 @@ def traces(
             click.echo(f"Error fetching traces: {e}", err=True)
             sys.exit(1)
 
-        click.echo(f"Found {len(traces_data)} trace(s). Saving to {output_path}/")
+        # Display timing information
+        total_time = timing_info.get("total_duration", 0)
+        fetch_time = timing_info.get("fetch_duration", 0)
+        avg_time = timing_info.get("avg_per_trace", 0)
+
+        click.echo(f"Found {len(traces_data)} trace(s) in {total_time:.2f}s. Saving to {output_path}/")
+        if len(traces_data) > 1 and avg_time > 0:
+            click.echo(f"  (Fetch time: {fetch_time:.2f}s, avg: {avg_time:.2f}s per trace)")
 
         # Save each trace to file
         for index, (trace_id, messages) in enumerate(traces_data, start=1):
@@ -742,6 +766,9 @@ def traces(
                     project_uuid=project_uuid,
                     last_n_minutes=last_n_minutes,
                     since=since,
+                    max_workers=max_concurrent,
+                    show_progress=not no_progress,
+                    return_timing=False,  # Don't return timing in stdout mode
                 )
 
                 # Format output as array of trace objects

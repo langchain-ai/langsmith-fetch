@@ -1,10 +1,15 @@
 """Core fetching logic for LangSmith threads and traces."""
 
 import json
+import sys
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from time import perf_counter
 from typing import Any
 
 import requests
+from rich.console import Console
+from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 
 try:
     from langsmith import Client  # noqa: F401
@@ -241,6 +246,122 @@ def fetch_latest_trace(
     return fetch_trace(trace_id, base_url=base_url, api_key=api_key)
 
 
+def _fetch_trace_safe(
+    trace_id: str, base_url: str, api_key: str
+) -> tuple[str, list[dict[str, Any]] | None, Exception | None]:
+    """Fetch a single trace with error handling.
+
+    Returns:
+        Tuple of (trace_id, messages or None, error or None)
+    """
+    try:
+        messages = fetch_trace(trace_id, base_url=base_url, api_key=api_key)
+        return (trace_id, messages, None)
+    except Exception as e:
+        return (trace_id, None, e)
+
+
+def _fetch_traces_concurrent(
+    runs: list,
+    base_url: str,
+    api_key: str,
+    max_workers: int = 5,
+    show_progress: bool = True,
+) -> tuple[list[tuple[str, list[dict[str, Any]]]], dict[str, float]]:
+    """Fetch multiple traces concurrently with optional progress display.
+
+    Args:
+        runs: List of run objects from client.list_runs()
+        base_url: LangSmith base URL
+        api_key: LangSmith API key
+        max_workers: Maximum number of concurrent requests (default: 5)
+        show_progress: Whether to show progress bar (default: True)
+
+    Returns:
+        Tuple of (results list, timing_info dict)
+    """
+    results = []
+    timing_info = {
+        "fetch_start": perf_counter(),
+        "traces_attempted": len(runs),
+        "traces_succeeded": 0,
+        "traces_failed": 0,
+    }
+
+    # For single trace, use simple sequential fetch (no progress overhead)
+    if len(runs) == 1:
+        trace_id = str(runs[0].id)
+        try:
+            start = perf_counter()
+            messages = fetch_trace(trace_id, base_url=base_url, api_key=api_key)
+            duration = perf_counter() - start
+            results.append((trace_id, messages))
+            timing_info["traces_succeeded"] = 1
+            timing_info["individual_timings"] = [duration]
+        except Exception as e:
+            print(f"Warning: Failed to fetch trace {trace_id}: {e}", file=sys.stderr)
+            timing_info["traces_failed"] = 1
+            timing_info["individual_timings"] = []
+
+        timing_info["fetch_duration"] = perf_counter() - timing_info["fetch_start"]
+        return results, timing_info
+
+    # Concurrent fetching with progress for multiple traces
+    individual_timings = []
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all fetch tasks
+        future_to_trace = {
+            executor.submit(_fetch_trace_safe, str(run.id), base_url, api_key): str(run.id)
+            for run in runs
+        }
+
+        # Setup progress bar if requested
+        if show_progress:
+            progress = Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TaskProgressColumn(),
+                console=Console(stderr=True),
+            )
+            progress.start()
+            task = progress.add_task(
+                f"[cyan]Fetching {len(runs)} traces...",
+                total=len(runs),
+            )
+
+        # Collect results as they complete
+        for future in as_completed(future_to_trace):
+            trace_id, messages, error = future.result()
+
+            if error:
+                msg = f"Warning: Failed to fetch trace {trace_id}: {error}"
+                if show_progress:
+                    progress.console.print(f"[yellow]{msg}[/yellow]")
+                else:
+                    print(msg, file=sys.stderr)
+                timing_info["traces_failed"] += 1
+            else:
+                results.append((trace_id, messages))
+                timing_info["traces_succeeded"] += 1
+
+            if show_progress:
+                progress.update(task, advance=1)
+
+        if show_progress:
+            progress.stop()
+
+    timing_info["fetch_duration"] = perf_counter() - timing_info["fetch_start"]
+    timing_info["individual_timings"] = individual_timings
+    if timing_info["traces_succeeded"] > 0:
+        timing_info["avg_per_trace"] = (
+            timing_info["fetch_duration"] / timing_info["traces_succeeded"]
+        )
+
+    return results, timing_info
+
+
 def fetch_recent_traces(
     api_key: str,
     base_url: str,
@@ -248,11 +369,15 @@ def fetch_recent_traces(
     project_uuid: str | None = None,
     last_n_minutes: int | None = None,
     since: str | None = None,
-) -> list[tuple[str, list[dict[str, Any]]]]:
-    """Fetch multiple recent traces from LangSmith.
+    max_workers: int = 5,
+    show_progress: bool = True,
+    return_timing: bool = False,
+) -> list[tuple[str, list[dict[str, Any]]]] | tuple[list[tuple[str, list[dict[str, Any]]]], dict]:
+    """Fetch multiple recent traces from LangSmith with concurrent fetching.
 
     Searches for recent root traces by chronological timestamp and returns
-    their messages. Similar to fetch_latest_trace but supports multiple traces.
+    their messages. Uses concurrent fetching for improved performance when
+    fetching multiple traces.
 
     Args:
         api_key: LangSmith API key for authentication
@@ -264,10 +389,15 @@ def fetch_recent_traces(
             from the last N minutes. Mutually exclusive with `since`.
         since: Optional ISO timestamp string (e.g., "2025-12-09T10:00:00Z").
             Only returns traces since this time. Mutually exclusive with `last_n_minutes`.
+        max_workers: Maximum number of concurrent fetch requests (default: 5)
+        show_progress: Whether to show progress bar during fetching (default: True)
+        return_timing: Whether to return timing information along with results (default: False)
 
     Returns:
-        List of tuples (trace_id, messages) for each trace, ordered by most recent first.
-        Each messages list contains message dictionaries from that trace.
+        If return_timing=False (default):
+            List of tuples (trace_id, messages) for each trace, ordered by most recent first.
+        If return_timing=True:
+            Tuple of (traces list, timing_dict) where timing_dict contains performance metrics.
 
     Raises:
         ValueError: If no traces found matching the criteria
@@ -279,7 +409,8 @@ def fetch_recent_traces(
         ...     base_url="https://api.smith.langchain.com",
         ...     limit=5,
         ...     project_uuid="80f1ecb3-a16b-411e-97ae-1c89adbb5c49",
-        ...     last_n_minutes=30
+        ...     last_n_minutes=30,
+        ...     max_workers=5
         ... )
         >>> for trace_id, messages in traces:
         ...     print(f"Trace {trace_id}: {len(messages)} messages")
@@ -317,31 +448,31 @@ def fetch_recent_traces(
         filter_params["start_time"] = start_time
 
     # Fetch runs
+    list_start = perf_counter()
     runs = list(client.list_runs(**filter_params))
+    list_duration = perf_counter() - list_start
 
     if not runs:
         raise ValueError("No traces found matching criteria")
 
-    # Fetch messages for each trace
-    results = []
-    for run in runs:
-        trace_id = str(run.id)
-        try:
-            messages = fetch_trace(trace_id, base_url=base_url, api_key=api_key)
-            results.append((trace_id, messages))
-        except Exception as e:
-            # Log error but continue with other traces
-            import sys
-
-            print(
-                f"Warning: Failed to fetch trace {trace_id}: {e}",
-                file=sys.stderr,
-            )
-            continue
+    # Fetch messages for each trace using concurrent fetching
+    results, timing_info = _fetch_traces_concurrent(
+        runs=runs,
+        base_url=base_url,
+        api_key=api_key,
+        max_workers=max_workers,
+        show_progress=show_progress,
+    )
 
     if not results:
         raise ValueError(
             f"Successfully queried {len(runs)} traces but failed to fetch messages for all of them"
         )
 
+    # Add list_runs timing to timing info
+    timing_info["list_runs_duration"] = list_duration
+    timing_info["total_duration"] = list_duration + timing_info["fetch_duration"]
+
+    if return_timing:
+        return results, timing_info
     return results
