@@ -399,10 +399,10 @@ class TestFetchRecentTraces:
         # Verify the traces were fetched correctly
         assert isinstance(traces_data, list)
         assert len(traces_data) == 2
-        assert traces_data[0][0] == "trace-id-1"
-        assert traces_data[1][0] == "trace-id-2"
-        assert isinstance(traces_data[0][1], list)  # messages
-        assert isinstance(traces_data[1][1], list)  # messages
+        # Order doesn't matter with concurrent fetching, just check both IDs present
+        trace_ids = {trace_id for trace_id, _ in traces_data}
+        assert trace_ids == {"trace-id-1", "trace-id-2"}
+        assert all(isinstance(messages, list) for _, messages in traces_data)
 
     @patch("langsmith.Client")
     def test_fetch_recent_traces_no_traces_found(self, mock_client_class):
