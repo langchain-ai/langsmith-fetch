@@ -112,8 +112,6 @@ Learn more in the [LangSmith threads documentation](https://docs.langchain.com/l
 - **`thread <id>`** - "I have a specific thread ID and want all its messages"
 - **`threads <dir>`** - "I want to download multiple threads for batch processing"
 
-**Note:** The `latest` command is deprecated. Use `traces` instead.
-
 ### Where to find each ID
 
 You can find each ID in the LangSmith UI as shown in the screenshots below:
