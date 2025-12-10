@@ -248,3 +248,152 @@ class TestConfigFunctions:
                 assert get_config_value("project_uuid") == TEST_PROJECT_UUID
                 # Get with hyphen should work
                 assert get_config_value("project-uuid") == TEST_PROJECT_UUID
+
+
+class TestProjectLookup:
+    """Tests for automatic project UUID lookup from LANGSMITH_PROJECT."""
+
+    def test_get_project_uuid_priority_config_first(self, temp_config_dir, monkeypatch):
+        """Test that config file takes priority over env var lookup."""
+        monkeypatch.setenv("LANGSMITH_PROJECT", "my-project")
+        monkeypatch.setenv("LANGSMITH_PROJECT_UUID", "env-uuid")
+
+        with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
+            with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
+                from langsmith_cli.config import get_project_uuid, set_config_value
+
+                set_config_value("project-uuid", "config-uuid")
+
+                # Config file should win
+                assert get_project_uuid() == "config-uuid"
+
+    def test_get_project_uuid_priority_env_uuid_second(self, temp_config_dir, monkeypatch):
+        """Test that LANGSMITH_PROJECT_UUID env var is second priority."""
+        monkeypatch.setenv("LANGSMITH_PROJECT", "my-project")
+        monkeypatch.setenv("LANGSMITH_PROJECT_UUID", "env-uuid")
+
+        with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
+            with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
+                from langsmith_cli.config import get_project_uuid
+
+                # LANGSMITH_PROJECT_UUID should be used without API lookup
+                assert get_project_uuid() == "env-uuid"
+
+    def test_lookup_project_uuid_success(self, temp_config_dir, monkeypatch):
+        """Test successful project lookup via API."""
+        from unittest.mock import Mock, MagicMock
+
+        monkeypatch.setenv("LANGSMITH_PROJECT", "test-project")
+        monkeypatch.setenv("LANGSMITH_API_KEY", TEST_API_KEY)
+
+        # Mock LangSmith Client
+        mock_project = Mock()
+        mock_project.id = "looked-up-uuid"
+        mock_project.name = "test-project"
+
+        mock_client = MagicMock()
+        mock_client.list_projects.return_value = [mock_project]
+
+        with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
+            with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
+                with patch("langsmith.Client", return_value=mock_client):
+                    from langsmith_cli.config import get_project_uuid
+
+                    result = get_project_uuid()
+                    assert result == "looked-up-uuid"
+                    mock_client.list_projects.assert_called_once()
+
+    def test_lookup_project_uuid_no_match(self, temp_config_dir, monkeypatch):
+        """Test error handling when no project matches."""
+        from unittest.mock import Mock, MagicMock
+
+        monkeypatch.setenv("LANGSMITH_PROJECT", "nonexistent")
+        monkeypatch.setenv("LANGSMITH_API_KEY", TEST_API_KEY)
+
+        mock_project = Mock()
+        mock_project.id = "other-uuid"
+        mock_project.name = "other-project"
+
+        mock_client = MagicMock()
+        mock_client.list_projects.return_value = [mock_project]
+
+        with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
+            with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
+                with patch("langsmith.Client", return_value=mock_client):
+                    from langsmith_cli.config import get_project_uuid
+
+                    # Should return None and print error to stderr
+                    result = get_project_uuid()
+                    assert result is None
+
+    def test_lookup_project_uuid_multiple_matches(self, temp_config_dir, monkeypatch):
+        """Test error handling when multiple projects match."""
+        from unittest.mock import Mock, MagicMock
+
+        monkeypatch.setenv("LANGSMITH_PROJECT", "test")
+        monkeypatch.setenv("LANGSMITH_API_KEY", TEST_API_KEY)
+
+        mock_project1 = Mock()
+        mock_project1.id = "uuid1"
+        mock_project1.name = "test-project-1"
+
+        mock_project2 = Mock()
+        mock_project2.id = "uuid2"
+        mock_project2.name = "test-project-2"
+
+        mock_client = MagicMock()
+        mock_client.list_projects.return_value = [mock_project1, mock_project2]
+
+        with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
+            with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
+                with patch("langsmith.Client", return_value=mock_client):
+                    from langsmith_cli.config import get_project_uuid
+
+                    # Should return None and print error listing matches
+                    result = get_project_uuid()
+                    assert result is None
+
+    def test_lookup_caching(self, temp_config_dir, monkeypatch):
+        """Test that lookup result is cached for session."""
+        from unittest.mock import Mock, MagicMock
+
+        monkeypatch.setenv("LANGSMITH_PROJECT", "cached-project")
+        monkeypatch.setenv("LANGSMITH_API_KEY", TEST_API_KEY)
+
+        mock_project = Mock()
+        mock_project.id = "cached-uuid"
+        mock_project.name = "cached-project"
+
+        mock_client = MagicMock()
+        mock_client.list_projects.return_value = [mock_project]
+
+        with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
+            with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
+                with patch("langsmith.Client", return_value=mock_client):
+                    from langsmith_cli.config import get_project_uuid, _project_uuid_cache
+
+                    # Clear cache first
+                    _project_uuid_cache.clear()
+
+                    # First call should hit API
+                    result1 = get_project_uuid()
+                    assert result1 == "cached-uuid"
+                    assert mock_client.list_projects.call_count == 1
+
+                    # Second call should use cache
+                    result2 = get_project_uuid()
+                    assert result2 == "cached-uuid"
+                    assert mock_client.list_projects.call_count == 1  # Still 1
+
+    def test_lookup_no_api_key(self, temp_config_dir, monkeypatch):
+        """Test graceful handling when API key is missing."""
+        monkeypatch.setenv("LANGSMITH_PROJECT", "test-project")
+        monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
+
+        with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
+            with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
+                from langsmith_cli.config import get_project_uuid
+
+                # Should return None with warning
+                result = get_project_uuid()
+                assert result is None

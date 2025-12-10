@@ -20,13 +20,14 @@ pip install langsmith-fetch
 
 ### Setup
 
-Set your LangSmith API key:
+Set your LangSmith API key and project name:
 
 ```bash
 export LANGSMITH_API_KEY=lsv2_...
+export LANGSMITH_PROJECT=your-project-name
 ```
 
-Get your LangSmith project UUID (not name - UUID)
+That's it! The CLI will automatically look up your project UUID based on the project name. No need to manually find and copy UUIDs from the UI.
 
 ## Usage with a coding agent
 
@@ -34,15 +35,11 @@ Start your favorite coding agent.
 
 Ask it:
 
-**Use langsmith-fetch to analyze the last 3 threads from project <project-uuid> for potential improvements**
+**Use langsmith-fetch to analyze the last 3 threads from my LangSmith project for potential improvements**
+
+The CLI will automatically use your `LANGSMITH_PROJECT` environment variable if it's already set (which it usually is if you're running LangSmith-enabled code).
 
 ## Direct Usage
-
-Set your project UUID (recommended for most workflows):
-
-```bash
-langsmith-fetch config set project-uuid <your-project-uuid>
-```
 
 **Fetch recent threads to a directory (RECOMMENDED):**
 
@@ -138,18 +135,20 @@ Learn more in the [LangSmith threads documentation](https://docs.langchain.com/l
 
 ### Where to find each ID
 
+**Note:** With automatic project lookup, you only need the project *name* (from `LANGSMITH_PROJECT` env var), not the UUID. The sections below are only needed if you want to manually set the UUID or fetch specific traces/threads by ID.
+
 You can find each ID in the LangSmith UI as shown in the screenshots below:
 
-**Project ID:**
+**Project ID** (optional with automatic lookup):
 ![Project ID location](images/project_id.png)
 
-**Trace ID:**
+**Trace ID** (for fetching specific traces):
 ![Trace ID location](images/trace_id.png)
 
-**Thread ID:**
+**Thread ID** (for fetching specific threads):
 ![Thread ID location](images/thread_id.png)
 
-Alternatively, you can get the project UUID programmatically:
+Alternatively, you can get the project UUID programmatically (this is what the CLI does automatically):
 
 ```python
 from langsmith import Client
@@ -170,10 +169,23 @@ for p in projects:
 
 ## Configuration
 
-Add your project UUID and API key to the config file:
+### Automatic Project Lookup (Recommended)
+
+The easiest way to configure is using environment variables:
 
 ```bash
-# Set project UUID (required for threads, optional but recommended for traces)
+export LANGSMITH_API_KEY=lsv2_...
+export LANGSMITH_PROJECT=your-project-name
+```
+
+The CLI will automatically look up your project UUID based on the project name. The lookup result is cached for the session, so you only pay the API call cost once.
+
+### Manual Configuration (Alternative)
+
+If you prefer to use a config file or need to set a specific project UUID:
+
+```bash
+# Set project UUID explicitly
 langsmith-fetch config set project-uuid <your-project-uuid>
 
 # Set API key (optional, uses LANGSMITH_API_KEY env var by default)
@@ -182,6 +194,11 @@ langsmith-fetch config set api-key lsv2_...
 # View your configuration
 langsmith-fetch config show
 ```
+
+**Priority order** (highest to lowest):
+1. Config file (`~/.langsmith-cli/config.yaml`)
+2. `LANGSMITH_PROJECT_UUID` environment variable
+3. `LANGSMITH_PROJECT` environment variable (automatic lookup)
 
 Config file location: `~/.langsmith-cli/config.yaml`
 

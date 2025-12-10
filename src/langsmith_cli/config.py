@@ -9,6 +9,9 @@ import yaml
 CONFIG_DIR = Path.home() / ".langsmith-cli"
 CONFIG_FILE = CONFIG_DIR / "config.yaml"
 
+# Cache for project UUID lookups (avoids redundant API calls per session)
+_project_uuid_cache: dict[str, str | None] = {}
+
 
 def _ensure_config_dir():
     """Ensure the config directory exists."""
@@ -75,6 +78,64 @@ def set_config_value(key: str, value: str):
     save_config(config)
 
 
+def _lookup_project_uuid_by_name(
+    project_name: str,
+    api_key: str,
+    base_url: str | None = None
+) -> str:
+    """
+    Look up project UUID by name using LangSmith API.
+
+    Args:
+        project_name: Project name to search for
+        api_key: LangSmith API key
+        base_url: Optional base URL override
+
+    Returns:
+        Project UUID string
+
+    Raises:
+        ValueError: If no match, multiple matches, or lookup fails
+    """
+    from langsmith import Client
+
+    # Initialize client
+    client = Client(api_key=api_key, api_url=base_url)
+
+    # Fetch projects
+    try:
+        projects = list(client.list_projects())
+    except Exception as e:
+        raise ValueError(
+            f"Failed to fetch projects from LangSmith API: {e}\n"
+            f"Consider setting LANGSMITH_PROJECT_UUID or using 'langsmith-fetch config set project-uuid <uuid>'."
+        )
+
+    # Find matching projects (case-insensitive partial match)
+    matches = [
+        p for p in projects
+        if project_name.lower() in p.name.lower()
+    ]
+
+    if not matches:
+        available = [p.name for p in projects[:5]]
+        available_str = ', '.join(available) if available else 'none'
+        raise ValueError(
+            f"No project found matching '{project_name}'.\n"
+            f"Available projects (first 5): {available_str}\n"
+            f"Use 'langsmith-fetch config set project-uuid <uuid>' to set explicitly."
+        )
+
+    if len(matches) > 1:
+        match_list = '\n'.join([f"  - {p.name} (UUID: {p.id})" for p in matches])
+        raise ValueError(
+            f"Multiple projects match '{project_name}':\n{match_list}\n"
+            f"Use 'langsmith-fetch config set project-uuid <uuid>' to set explicitly."
+        )
+
+    return str(matches[0].id)
+
+
 def get_api_key() -> str | None:
     """
     Get API key from config or environment variable.
@@ -105,12 +166,72 @@ def get_base_url() -> str | None:
 
 def get_project_uuid() -> str | None:
     """
-    Get project UUID from config.
+    Get project UUID from config, env var, or by looking up LANGSMITH_PROJECT.
+
+    Priority order:
+    1. Config file (project_uuid)
+    2. LANGSMITH_PROJECT_UUID env var (explicit UUID)
+    3. LANGSMITH_PROJECT env var → API lookup → cached
 
     Returns:
-        Project UUID from config file or None
+        Project UUID from config file, env var, or looked up by name, or None
     """
-    return get_config_value("project_uuid")
+    # Priority 1: Config file
+    if config_uuid := get_config_value("project_uuid"):
+        return config_uuid
+
+    # Priority 2: Direct UUID from env var
+    if env_uuid := os.environ.get("LANGSMITH_PROJECT_UUID"):
+        return env_uuid
+
+    # Priority 3: Project name from env var → lookup
+    project_name = os.environ.get("LANGSMITH_PROJECT")
+    if not project_name:
+        return None
+
+    # Check cache first
+    if project_name in _project_uuid_cache:
+        return _project_uuid_cache[project_name]
+
+    # Lookup via API
+    try:
+        # Need API key for lookup
+        api_key = get_api_key()
+        if not api_key:
+            import sys
+            print(
+                "Warning: LANGSMITH_PROJECT set but no API key found. "
+                "Set LANGSMITH_API_KEY to enable project lookup.",
+                file=sys.stderr
+            )
+            return None
+
+        base_url = get_base_url()
+
+        # Inform user about lookup
+        import sys
+        print(f"Looking up project '{project_name}'...", file=sys.stderr)
+
+        uuid = _lookup_project_uuid_by_name(project_name, api_key, base_url)
+
+        # Cache result
+        _project_uuid_cache[project_name] = uuid
+
+        print(f"Found project '{project_name}' (UUID: {uuid})", file=sys.stderr)
+
+        return uuid
+
+    except ValueError as e:
+        import sys
+        print(f"Error: {e}", file=sys.stderr)
+        return None
+    except Exception as e:
+        import sys
+        print(
+            f"Warning: Failed to lookup project '{project_name}': {e}",
+            file=sys.stderr
+        )
+        return None
 
 
 def get_default_format() -> str:
