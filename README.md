@@ -15,11 +15,7 @@ CLI for fetching and displaying LangSmith data with LLM friendly formatting:
 ### Installation
 
 ```bash
-# Via pip (coming soon to PyPI)
 pip install langsmith-fetch
-
-# For now, install from source
-pip install git+https://github.com/langchain-ai/langsmith-fetch.git
 ```
 
 ### Basic Usage
@@ -30,30 +26,37 @@ Set your API key:
 export LANGSMITH_API_KEY=lsv2_...
 ```
 
-Fetch the most recent trace in your LangSmith project:
-
-```bash
-langsmith-fetch traces
-```
-
-Fetch a specific trace in your LangSmith project by ID:
-
-```bash
-langsmith-fetch trace 3b0b15fe-1e3a-4aef-afa8-48df15879cfe
-```
-
-Set your project UUID and fetch recent threads:
+Set your project UUID (recommended for most workflows):
 
 ```bash
 langsmith-fetch config set project-uuid <your-project-uuid>
+```
+
+**Fetch recent threads to a directory (RECOMMENDED):**
+
+```bash
+# Fetch 10 most recent threads to ./my-threads directory
 langsmith-fetch threads ./my-threads --limit 10
 ```
 
-Or fetch a specific thread by ID:
+**Fetch recent traces to a directory (RECOMMENDED):**
 
 ```bash
+# Fetch 10 most recent traces to ./my-traces directory
+langsmith-fetch traces ./my-traces --limit 10
+```
+
+**Fetch specific items by ID:**
+
+```bash
+# Fetch a specific trace by ID
+langsmith-fetch trace 3b0b15fe-1e3a-4aef-afa8-48df15879cfe
+
+# Fetch a specific thread by ID
 langsmith-fetch thread test-email-agent-thread
 ```
+
+> **Note:** When using `traces` or `threads` commands, always specify an output directory unless you explicitly want stdout output. Directory mode is the recommended default for typical workflows.
 
 ### Output Formats
 
@@ -73,7 +76,7 @@ LangSmith Fetch supports three output formats for different use cases:
 
 ### Save to File
 
-All commands support saving output to a file instead of printing to stdout:
+Single item commands (`trace` and `thread`) support saving output to a file:
 
 ```bash
 # Save trace to JSON file
@@ -81,9 +84,16 @@ langsmith-fetch trace <trace-id> --file output.json --format json
 
 # Save thread to text file
 langsmith-fetch thread <thread-id> --file output.txt --format pretty
+```
 
-# Save most recent trace to file
-langsmith-fetch traces --file latest.json --format raw
+For bulk fetching (`traces` and `threads`), use directory mode instead:
+
+```bash
+# RECOMMENDED: Save multiple traces to directory (one file per trace)
+langsmith-fetch traces ./my-traces --limit 10
+
+# RECOMMENDED: Save multiple threads to directory (one file per thread)
+langsmith-fetch threads ./my-threads --limit 10
 ```
 
 ## Features
@@ -103,14 +113,16 @@ Learn more in the [LangSmith threads documentation](https://docs.langchain.com/l
 |---------|----------------|--------|
 | `trace <id>` | Specific **trace** by ID | stdout or file |
 | `thread <id>` | Specific **thread** by ID | stdout or file |
-| `traces [dir]` | Recent **traces** (bulk or single) | stdout/file OR directory |
-| `threads <dir>` | Multiple recent **threads** (bulk) | Multiple JSON files in directory |
+| `traces <dir>` | Recent **traces** (bulk) | Multiple JSON files in directory (RECOMMENDED) |
+| `threads <dir>` | Recent **threads** (bulk) | Multiple JSON files in directory (RECOMMENDED) |
 
 **When to use each:**
-- **`traces`** - "Fetch recent trace(s) by time" (replaces `latest`, supports bulk)
+- **`traces <dir>`** - "Fetch recent traces to directory" (RECOMMENDED: use directory mode by default)
+- **`threads <dir>`** - "Fetch recent threads to directory" (RECOMMENDED: use directory mode by default)
 - **`trace <id>`** - "I have a specific trace ID from the UI"
 - **`thread <id>`** - "I have a specific thread ID and want all its messages"
-- **`threads <dir>`** - "I want to download multiple threads for batch processing"
+
+**Important:** For `traces` and `threads` commands, always specify an output directory unless you explicitly need stdout output.
 
 ### Where to find each ID
 
@@ -165,11 +177,11 @@ Config file location: `~/.langsmith-cli/config.yaml`
 
 ### Fetch Recent Threads
 
-Fetch the most recent threads from a project and save each to a separate JSON file:
+**RECOMMENDED: Use directory mode to save each thread to a separate JSON file:**
 
 ```bash
-# Fetch 10 most recent threads (default) to ./my-threads directory
-langsmith-fetch threads ./my-threads
+# Fetch 10 most recent threads to ./my-threads directory
+langsmith-fetch threads ./my-threads --limit 10
 
 # Fetch 25 most recent threads
 langsmith-fetch threads ./my-threads --limit 25
@@ -188,6 +200,16 @@ langsmith-fetch threads ./my-threads --filename-pattern "thread_{index:03d}.json
   - `{thread_id}` - Thread ID (default: `{thread_id}.json`)
   - `{index}` or `{idx}` - Sequential number starting from 1
   - Format specs supported: `{index:03d}` for zero-padded numbers
+
+**Stdout mode (only if you explicitly need it):**
+
+```bash
+# Fetch latest thread to stdout
+langsmith-fetch threads --format json
+
+# Fetch 5 latest threads to stdout
+langsmith-fetch threads --limit 5 --format json
+```
 
 ### Fetch Thread by LangGraph thread_id
 
@@ -226,37 +248,10 @@ Perfect for the workflow: "I just did a thing and I want the CLI to just grab th
 
 The `traces` command has two modes:
 
-**STDOUT MODE (no output directory):**
-Fetch traces and print to stdout or save to a single file. Default limit is 1 trace.
+**DIRECTORY MODE (RECOMMENDED) - Save each trace to a separate JSON file:**
 
 ```bash
-# Fetch most recent trace (default: 1 trace, pretty format)
-langsmith-fetch traces
-
-# Fetch most recent trace from a specific project (recommended for faster results)
-langsmith-fetch traces --project-uuid 80f1ecb3-a16b-411e-97ae-1c89adbb5c49
-
-# Fetch most recent trace from last 30 minutes
-langsmith-fetch traces --last-n-minutes 30
-
-# Fetch most recent trace since a specific time
-langsmith-fetch traces --since 2025-12-09T10:00:00Z
-
-# Fetch 5 most recent traces
-langsmith-fetch traces --limit 5
-
-# Fetch with JSON output format
-langsmith-fetch traces --format json
-
-# Save to file
-langsmith-fetch traces --file latest.json --format raw
-```
-
-**DIRECTORY MODE (with output directory):**
-Fetch multiple traces and save each to a separate JSON file.
-
-```bash
-# Fetch 10 traces to ./my-traces directory (default limit when dir specified: 1)
+# Fetch 10 traces to ./my-traces directory
 langsmith-fetch traces ./my-traces --limit 10
 
 # Fetch 25 traces with sequential numbering
@@ -264,6 +259,9 @@ langsmith-fetch traces ./my-traces --limit 25 --filename-pattern "trace_{index:0
 
 # Fetch traces from last hour
 langsmith-fetch traces ./my-traces --limit 20 --last-n-minutes 60
+
+# Fetch traces since a specific time
+langsmith-fetch traces ./my-traces --limit 10 --since 2025-12-09T10:00:00Z
 ```
 
 **File Naming (directory mode):**
@@ -273,9 +271,30 @@ langsmith-fetch traces ./my-traces --limit 20 --last-n-minutes 60
   - `{index}` or `{idx}` - Sequential number starting from 1
   - Format specs supported: `{index:03d}` for zero-padded numbers
 
+**STDOUT MODE (only if you explicitly need it):**
+Fetch traces and print to stdout or save to a single file.
+
+```bash
+# Fetch most recent trace (default: 1 trace, pretty format)
+langsmith-fetch traces
+
+# Fetch most recent trace from a specific project
+langsmith-fetch traces --project-uuid 80f1ecb3-a16b-411e-97ae-1c89adbb5c49
+
+# Fetch most recent trace from last 30 minutes
+langsmith-fetch traces --last-n-minutes 30
+
+# Fetch 5 most recent traces to stdout
+langsmith-fetch traces --limit 5 --format json
+
+# Save to single file
+langsmith-fetch traces --file latest.json --format raw
+```
+
 **Notes:**
 - While project UUID is optional, providing it (via config or `--project-uuid`) filters results to a specific project, making searches faster and more targeted.
 - Traces are fetched by chronological time (most recent first)
+- **Always use directory mode unless you explicitly need stdout output**
 
 ## Examples
 
