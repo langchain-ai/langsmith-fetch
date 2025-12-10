@@ -30,13 +30,13 @@ Set your API key:
 export LANGSMITH_API_KEY=lsv2_...
 ```
 
-Fetch the most recent trace:
+Fetch the most recent trace in your LangSmith project:
 
 ```bash
-langsmith-fetch latest
+langsmith-fetch traces
 ```
 
-Fetch a specific trace by ID:
+Fetch a specific trace in your LangSmith project by ID:
 
 ```bash
 langsmith-fetch trace 3b0b15fe-1e3a-4aef-afa8-48df15879cfe
@@ -82,8 +82,8 @@ langsmith-fetch trace <trace-id> --file output.json --format json
 # Save thread to text file
 langsmith-fetch thread <thread-id> --file output.txt --format pretty
 
-# Save latest trace to file
-langsmith-fetch latest --file latest.json --format raw
+# Save most recent trace to file
+langsmith-fetch traces --file latest.json --format raw
 ```
 
 ## Features
@@ -101,9 +101,9 @@ Learn more in the [LangSmith threads documentation](https://docs.langchain.com/l
 
 | Command | What it fetches | Output |
 |---------|----------------|--------|
-| `traces [dir]` | Recent **traces** (bulk or single) | stdout/file OR directory |
 | `trace <id>` | Specific **trace** by ID | stdout or file |
 | `thread <id>` | Specific **thread** by ID | stdout or file |
+| `traces [dir]` | Recent **traces** (bulk or single) | stdout/file OR directory |
 | `threads <dir>` | Multiple recent **threads** (bulk) | Multiple JSON files in directory |
 
 **When to use each:**
@@ -149,7 +149,7 @@ for p in projects:
 Add your project UUID and API key to the config file:
 
 ```bash
-# Set project UUID (required for threads, optional but recommended for latest)
+# Set project UUID (required for threads, optional but recommended for traces)
 langsmith-fetch config set project-uuid <your-project-uuid>
 
 # Set API key (optional, uses LANGSMITH_API_KEY env var by default)
@@ -220,33 +220,62 @@ langsmith-fetch trace 3b0b15fe-1e3a-4aef-afa8-48df15879cfe --format json
 langsmith-fetch trace 3b0b15fe-1e3a-4aef-afa8-48df15879cfe --file trace.json --format json
 ```
 
-### Auto-Fetch Latest Trace
+### Fetch Recent Traces
 
-Perfect for the workflow: "I just did a thing and I want the CLI to just grab the trace."
+Perfect for the workflow: "I just did a thing and I want the CLI to just grab the trace(s)."
+
+The `traces` command has two modes:
+
+**STDOUT MODE (no output directory):**
+Fetch traces and print to stdout or save to a single file. Default limit is 1 trace.
 
 ```bash
-# Fetch most recent trace across all projects
-langsmith-fetch latest
+# Fetch most recent trace (default: 1 trace, pretty format)
+langsmith-fetch traces
 
 # Fetch most recent trace from a specific project (recommended for faster results)
-langsmith-fetch latest --project-uuid 80f1ecb3-a16b-411e-97ae-1c89adbb5c49
+langsmith-fetch traces --project-uuid 80f1ecb3-a16b-411e-97ae-1c89adbb5c49
 
 # Fetch most recent trace from last 30 minutes
-langsmith-fetch latest --last-n-minutes 30
+langsmith-fetch traces --last-n-minutes 30
 
 # Fetch most recent trace since a specific time
-langsmith-fetch latest --since 2025-12-09T10:00:00Z
+langsmith-fetch traces --since 2025-12-09T10:00:00Z
+
+# Fetch 5 most recent traces
+langsmith-fetch traces --limit 5
 
 # Fetch with JSON output format
-langsmith-fetch latest --format json
+langsmith-fetch traces --format json
 
 # Save to file
-langsmith-fetch latest --file latest.json --format raw
+langsmith-fetch traces --file latest.json --format raw
 ```
 
+**DIRECTORY MODE (with output directory):**
+Fetch multiple traces and save each to a separate JSON file.
+
+```bash
+# Fetch 10 traces to ./my-traces directory (default limit when dir specified: 1)
+langsmith-fetch traces ./my-traces --limit 10
+
+# Fetch 25 traces with sequential numbering
+langsmith-fetch traces ./my-traces --limit 25 --filename-pattern "trace_{index:03d}.json"
+
+# Fetch traces from last hour
+langsmith-fetch traces ./my-traces --limit 20 --last-n-minutes 60
+```
+
+**File Naming (directory mode):**
+- Default: Files named by trace ID (e.g., `3b0b15fe-1e3a-4aef-afa8-48df15879cfe.json`)
+- Custom pattern: Use `--filename-pattern` with placeholders:
+  - `{trace_id}` - Trace ID (default: `{trace_id}.json`)
+  - `{index}` or `{idx}` - Sequential number starting from 1
+  - Format specs supported: `{index:03d}` for zero-padded numbers
+
 **Notes:**
-- The `latest` command currently fetches the most recent trace only. Support for fetching the latest thread will be added in a future release when SDK support becomes available.
 - While project UUID is optional, providing it (via config or `--project-uuid`) filters results to a specific project, making searches faster and more targeted.
+- Traces are fetched by chronological time (most recent first)
 
 ## Examples
 
@@ -306,7 +335,7 @@ pytest tests/ --cov=langsmith_cli
 ```
 
 The test suite includes 50 tests covering:
-- All CLI commands (latest, trace, thread, config)
+- All CLI commands (traces, trace, thread, threads, config)
 - All output formats (pretty, json, raw)
 - Config management and storage
 - API fetching and error handling
