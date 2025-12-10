@@ -27,17 +27,13 @@ export LANGSMITH_API_KEY=lsv2_...
 export LANGSMITH_PROJECT=your-project-name
 ```
 
-That's it! The CLI will automatically look up your project UUID based on the project name. No need to manually find and copy UUIDs from the UI.
+That's it! The CLI will automatically fetch traces or threads in `LANGSMITH_PROJECT`.
 
-## Usage with a coding agent
+## Usage coding agent
 
-Start your favorite coding agent.
-
-Ask it:
-
-**Use langsmith-fetch to analyze the last 3 threads from my LangSmith project for potential improvements**
-
-The CLI will automatically use your `LANGSMITH_PROJECT` environment variable if it's already set (which it usually is if you're running LangSmith-enabled code).
+Start your favorite coding agent and ask questions like the following. Many agents will use the `langsmith-fetch --help` command to understand how to use the CLI and complete your request. 
+ 
+> Use langsmith-fetch to analyze the last 3 threads from my LangSmith project for potential improvements
 
 ## Direct Usage
 
