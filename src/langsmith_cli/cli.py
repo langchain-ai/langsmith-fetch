@@ -170,7 +170,7 @@ def thread(thread_id, project_uuid, format_type, output_file):
 
     if not project_uuid:
         click.echo(
-            "Error: project-uuid required. Set with: langsmith-fetch config set project-uuid <uuid>",
+            "Error: project-uuid required. Pass --project-uuid <uuid> flag",
             err=True,
         )
         sys.exit(1)
@@ -379,7 +379,7 @@ def threads(output_dir, project_uuid, limit, filename_pattern, last_n_minutes, s
 
     if not project_uuid:
         click.echo(
-            "Error: project-uuid required. Set with: langsmith-fetch config set project-uuid <uuid>",
+            "Error: project-uuid required. Pass --project-uuid <uuid> flag",
             err=True,
         )
         sys.exit(1)
