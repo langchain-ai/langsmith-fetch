@@ -44,7 +44,8 @@ def main():
       - Project UUID (required for thread fetching only)
 
     COMMON COMMANDS:
-      langsmith-fetch latest                              # Fetch most recent trace (by time)
+      langsmith-fetch traces                              # Fetch recent trace(s) (by time)
+      langsmith-fetch traces ./dir --limit 10             # Fetch 10 traces to directory
       langsmith-fetch trace <trace-id>                    # Fetch a specific trace by ID
       langsmith-fetch thread <thread-id>                  # Fetch a specific thread by ID
       langsmith-fetch threads <output-dir> --limit 10     # Fetch recent threads (bulk)
@@ -550,6 +551,12 @@ def latest(project_uuid, format_type, last_n_minutes, since, output_file):
       - To fetch a specific trace by ID, use: langsmith-fetch trace <trace-id>
       - To fetch a specific thread by ID, use: langsmith-fetch thread <thread-id>
     """
+
+    # Deprecation warning
+    click.echo(
+        "Warning: The 'latest' command is deprecated. Use 'langsmith-fetch traces' instead.",
+        err=True,
+    )
 
     # Validate mutually exclusive time filters
     if last_n_minutes is not None and since is not None:
