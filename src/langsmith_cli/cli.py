@@ -178,13 +178,13 @@ def thread(thread_id, project_uuid, format_type, output_file):
         format_type = config.get_default_format()
 
     try:
-        # Fetch messages
-        messages = fetchers.fetch_thread(
+        # Fetch thread with metadata and feedback
+        thread_data = fetchers.fetch_thread_with_metadata(
             thread_id, project_uuid, base_url=base_url, api_key=api_key
         )
 
-        # Output
-        formatters.print_formatted(messages, format_type, output_file)
+        # Output with metadata and feedback
+        formatters.print_formatted_trace(thread_data, format_type, output_file)
 
     except Exception as e:
         click.echo(f"Error fetching thread: {e}", err=True)
@@ -250,11 +250,13 @@ def trace(trace_id, format_type, output_file):
         format_type = config.get_default_format()
 
     try:
-        # Fetch messages
-        messages = fetchers.fetch_trace(trace_id, base_url=base_url, api_key=api_key)
+        # Fetch trace with metadata and feedback
+        trace_data = fetchers.fetch_trace_with_metadata(
+            trace_id, base_url=base_url, api_key=api_key
+        )
 
-        # Output
-        formatters.print_formatted(messages, format_type, output_file)
+        # Output with metadata and feedback
+        formatters.print_formatted_trace(trace_data, format_type, output_file)
 
     except Exception as e:
         click.echo(f"Error fetching trace: {e}", err=True)
@@ -705,8 +707,8 @@ def traces(
                 f"  (Fetch time: {fetch_time:.2f}s, avg: {avg_time:.2f}s per trace)"
             )
 
-        # Save each trace to file
-        for index, (trace_id, messages) in enumerate(traces_data, start=1):
+        # Save each trace to file with metadata and feedback
+        for index, (trace_id, trace_data) in enumerate(traces_data, start=1):
             filename_str = filename_pattern.format(
                 trace_id=trace_id, index=index, idx=index
             )
@@ -716,10 +718,17 @@ def traces(
 
             filename = output_path / safe_filename
             with open(filename, "w") as f:
-                json.dump(messages, f, indent=2, default=str)
-            click.echo(
-                f"  ✓ Saved {trace_id} to {safe_filename} ({len(messages)} messages)"
-            )
+                json.dump(trace_data, f, indent=2, default=str)
+
+            # Show summary of saved data
+            messages_count = len(trace_data.get("messages", []))
+            feedback_count = len(trace_data.get("feedback", []))
+            status = trace_data.get("metadata", {}).get("status", "unknown")
+            summary = f"{messages_count} messages, status: {status}"
+            if feedback_count > 0:
+                summary += f", {feedback_count} feedback"
+
+            click.echo(f"  ✓ Saved {trace_id} to {safe_filename} ({summary})")
 
         click.echo(
             f"\n✓ Successfully saved {len(traces_data)} trace(s) to {output_path}/"
@@ -731,88 +740,66 @@ def traces(
         if not format_type:
             format_type = config.get_default_format()
 
-        # For limit=1, use optimized single-trace fetch (backward compatible with latest)
-        if limit == 1:
-            try:
-                messages = fetchers.fetch_latest_trace(
-                    api_key=api_key,
-                    base_url=base_url,
-                    project_uuid=project_uuid,
-                    last_n_minutes=last_n_minutes,
-                    since=since,
-                )
+        try:
+            # Fetch traces with metadata and feedback
+            traces_data = fetchers.fetch_recent_traces(
+                api_key=api_key,
+                base_url=base_url,
+                limit=limit,
+                project_uuid=project_uuid,
+                last_n_minutes=last_n_minutes,
+                since=since,
+                max_workers=max_concurrent,
+                show_progress=not no_progress,
+                return_timing=False,
+            )
 
-                # Output to file or stdout
+            # For limit=1, output single trace directly
+            if limit == 1 and len(traces_data) == 1:
+                trace_id, trace_data = traces_data[0]
                 if output_file:
-                    with open(output_file, "w") as f:
-                        if format_type == "raw":
-                            json.dump(messages, f)
-                        else:
-                            json.dump(messages, f, indent=2)
+                    formatters.print_formatted_trace(trace_data, format_type, output_file)
                     click.echo(f"Saved trace to {output_file}")
                 else:
-                    formatters.print_formatted(messages, format_type, None)
+                    formatters.print_formatted_trace(trace_data, format_type, None)
 
-            except ValueError as e:
-                click.echo(f"Error: {e}", err=True)
-                sys.exit(1)
-            except Exception as e:
-                click.echo(f"Error fetching trace: {e}", err=True)
-                sys.exit(1)
-
-        # For limit>1, fetch multiple and output as array
-        else:
-            try:
-                traces_data = fetchers.fetch_recent_traces(
-                    api_key=api_key,
-                    base_url=base_url,
-                    limit=limit,
-                    project_uuid=project_uuid,
-                    last_n_minutes=last_n_minutes,
-                    since=since,
-                    max_workers=max_concurrent,
-                    show_progress=not no_progress,
-                    return_timing=False,  # Don't return timing in stdout mode
-                )
-
-                # Format output as array of trace objects
-                output_data = [
-                    {"trace_id": trace_id, "messages": messages}
-                    for trace_id, messages in traces_data
-                ]
+            # For limit>1, output as array
+            else:
+                # traces_data is already a list of (trace_id, trace_data) tuples
+                output_data = [trace_data for _, trace_data in traces_data]
 
                 # Output to file or stdout
                 if output_file:
                     with open(output_file, "w") as f:
                         if format_type == "raw":
-                            json.dump(output_data, f)
+                            json.dump(output_data, f, default=str)
                         else:
-                            json.dump(output_data, f, indent=2)
+                            json.dump(output_data, f, indent=2, default=str)
                     click.echo(f"Saved {len(traces_data)} trace(s) to {output_file}")
                 else:
                     if format_type == "raw":
-                        click.echo(json.dumps(output_data))
+                        click.echo(json.dumps(output_data, default=str))
                     elif format_type == "json":
                         from rich.syntax import Syntax
 
-                        json_str = json.dumps(output_data, indent=2)
+                        json_str = json.dumps(output_data, indent=2, default=str)
                         syntax = Syntax(
                             json_str, "json", theme="monokai", line_numbers=False
                         )
                         console.print(syntax)
                     else:  # pretty
-                        for trace_id, messages in traces_data:
+                        for trace_id, trace_data in traces_data:
                             click.echo(f"\n{'=' * 60}")
                             click.echo(f"Trace: {trace_id}")
                             click.echo("=" * 60)
-                            formatters.print_formatted(messages, "pretty", None)
+                            formatters.print_formatted_trace(trace_data, "pretty", None)
 
-            except ValueError as e:
-                click.echo(f"Error: {e}", err=True)
-                sys.exit(1)
-            except Exception as e:
-                click.echo(f"Error fetching traces: {e}", err=True)
-                sys.exit(1)
+        except ValueError as e:
+            click.echo(f"Error: {e}", err=True)
+            sys.exit(1)
+        except Exception as e:
+            click.echo(f"Error fetching traces: {e}", err=True)
+            sys.exit(1)
 
 
 @main.group()
