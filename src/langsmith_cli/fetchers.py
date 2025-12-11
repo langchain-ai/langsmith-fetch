@@ -215,6 +215,10 @@ def fetch_recent_threads(
                 if messages is not None:
                     results.append((thread_id, messages))
 
+    # Sort results to match original chronological order from thread_info
+    thread_id_order = list(thread_info.keys())
+    results.sort(key=lambda x: thread_id_order.index(x[0]))
+
     return results
 
 

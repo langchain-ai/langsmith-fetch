@@ -851,12 +851,13 @@ def traces(
 def config_cmd():
     """Manage configuration settings.
 
-    Store persistent settings like project UUID, API key, and default output format.
-    Configuration is stored in ~/.langsmith-cli/config.yaml
+    View current configuration settings.
+    Configuration is stored in ~/.langsmith-cli/config.yaml and can be edited directly.
 
     \b
     AVAILABLE SETTINGS:
       project-uuid    LangSmith project UUID (required for thread fetching)
+      project-name    LangSmith project name (paired with project-uuid)
       api-key         LangSmith API key (alternative to LANGSMITH_API_KEY env var)
       base-url        LangSmith base URL (alternative to LANGSMITH_ENDPOINT env var, defaults to https://api.smith.langchain.com)
       default-format  Default output format (raw, json, or pretty)
@@ -866,38 +867,10 @@ def config_cmd():
       # Check current configuration
       langsmith-fetch config show
 
-      # Set configuration values
-      langsmith-fetch config set project-uuid 80f1ecb3-a16b-411e-97ae-1c89adbb5c49
-      langsmith-fetch config set api-key lsv2_...
-      langsmith-fetch config set default-format json
+      # Edit config file directly
+      nano ~/.langsmith-cli/config.yaml
     """
     pass
-
-
-@config_cmd.command("set")
-@click.argument("key", metavar="KEY")
-@click.argument("value", metavar="VALUE")
-def config_set(key, value):
-    """Set a configuration value.
-
-    Store a configuration setting persistently. Common keys include:
-      - project-uuid: Required for fetching threads
-      - api-key: LangSmith API key (alternative to env var)
-      - base-url: LangSmith base URL (alternative to env var, defaults to https://api.smith.langchain.com)
-      - default-format: Output format (raw, json, or pretty)
-
-    \b
-    EXAMPLES:
-      langsmith-fetch config set project-uuid 80f1ecb3-a16b-411e-97ae-1c89adbb5c49
-      langsmith-fetch config set api-key lsv2_pt_...
-      langsmith-fetch config set default-format json
-    """
-    try:
-        config.set_config_value(key, value)
-        click.echo(f"✓ Set {key} = {value}")
-    except Exception as e:
-        click.echo(f"Error setting config: {e}", err=True)
-        sys.exit(1)
 
 
 @config_cmd.command("show")
