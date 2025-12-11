@@ -48,6 +48,9 @@ def main():
       langsmith-fetch thread <thread-id>                  # Fetch a specific thread by ID
       langsmith-fetch traces ./dir --limit 10             # Fetch 10 traces to directory (RECOMMENDED)
       langsmith-fetch threads ./dir --limit 10            # Fetch 10 threads to directory (RECOMMENDED)
+
+    CONFIGURATION:
+      langsmith-fetch config show                         # View current configuration
       langsmith-fetch config set project-uuid <uuid>      # Configure project UUID
       langsmith-fetch config set api-key <key>            # Store API key in config
 
@@ -831,10 +834,13 @@ def config_cmd():
 
     \b
     EXAMPLES:
+      # Check current configuration
+      langsmith-fetch config show
+
+      # Set configuration values
       langsmith-fetch config set project-uuid 80f1ecb3-a16b-411e-97ae-1c89adbb5c49
       langsmith-fetch config set api-key lsv2_...
       langsmith-fetch config set default-format json
-      langsmith-fetch config show
     """
     pass
 
