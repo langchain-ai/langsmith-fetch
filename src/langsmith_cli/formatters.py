@@ -332,9 +332,13 @@ def print_formatted_trace(
         syntax = Syntax(json_str, "json", theme="monokai", line_numbers=False)
         console.print(syntax)
     elif format_type == "pretty":
-        # Print formatted output directly (already has Rich-like formatting via text)
-        formatted = format_trace_data(data, "pretty")
-        console.print(formatted)
+        # For messages-only (list), use Rich panels
+        if isinstance(data, list):
+            print_formatted(data, format_type, None)
+        # For trace data with metadata (dict), use plain text format
+        else:
+            formatted = format_trace_data(data, "pretty")
+            console.print(formatted)
     else:
         # Raw format
         console.print(format_trace_data(data, "raw"))
