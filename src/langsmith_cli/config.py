@@ -70,16 +70,24 @@ def set_config_value(key: str, value: str):
     Set a configuration value.
 
     Args:
-        key: Configuration key to set
+        key: Configuration key to set (will be normalized to hyphen format)
         value: Value to set
     """
     config = load_config()
-    config[key] = value
+
+    # Normalize key to hyphen format
+    normalized_key = key.replace("_", "-")
+    config[normalized_key] = value
+
+    # Clean up old underscore format if different from normalized
+    if key != normalized_key and key in config:
+        del config[key]
+
     save_config(config)
 
-    # If manually setting project_uuid, clear in-memory cache
+    # If manually setting project-uuid, clear in-memory cache
     # to force re-validation on next lookup
-    if key in ("project-uuid", "project_uuid"):
+    if normalized_key == "project-uuid":
         _project_uuid_cache.clear()
 
 
@@ -95,6 +103,13 @@ def _update_project_config(project_name: str, project_uuid: str):
     config = load_config()
     config["project-name"] = project_name
     config["project-uuid"] = project_uuid
+
+    # Clean up old underscore format if it exists
+    if "project_uuid" in config:
+        del config["project_uuid"]
+    if "project_name" in config:
+        del config["project_name"]
+
     save_config(config)
 
 
@@ -184,9 +199,9 @@ def get_project_uuid() -> str | None:
     # Get current project name from env var
     env_project_name = os.environ.get("LANGSMITH_PROJECT")
 
-    # Load config values
-    config_project_uuid = get_config_value("project_uuid")
-    config_project_name = get_config_value("project_name")
+    # Load config values (use hyphen format as canonical)
+    config_project_uuid = get_config_value("project-uuid")
+    config_project_name = get_config_value("project-name")
 
     # Case 1: No env var set - use config as default
     if not env_project_name:

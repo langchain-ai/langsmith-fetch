@@ -302,6 +302,18 @@ def trace(trace_id, format_type, output_file):
     type=click.Choice(["raw", "json", "pretty"]),
     help="Output format: raw (compact JSON), json (pretty JSON), pretty (human-readable panels)",
 )
+@click.option(
+    "--no-progress",
+    is_flag=True,
+    default=False,
+    help="Disable progress bar display during fetch",
+)
+@click.option(
+    "--max-concurrent",
+    type=int,
+    default=5,
+    help="Maximum concurrent thread fetches (default: 5, max recommended: 10)",
+)
 def threads(
     output_dir,
     project_uuid,
@@ -310,6 +322,8 @@ def threads(
     since,
     filename_pattern,
     format_type,
+    no_progress,
+    max_concurrent,
 ):
     """Fetch recent threads from LangSmith BY CHRONOLOGICAL TIME.
 
@@ -430,6 +444,8 @@ def threads(
                 limit,
                 last_n_minutes=last_n_minutes,
                 since=since,
+                max_workers=max_concurrent,
+                show_progress=not no_progress,
             )
         except ValueError as e:
             click.echo(f"Error: {e}", err=True)
@@ -478,6 +494,8 @@ def threads(
                 limit,
                 last_n_minutes=last_n_minutes,
                 since=since,
+                max_workers=max_concurrent,
+                show_progress=not no_progress,
             )
 
             if not threads_data:
@@ -557,6 +575,18 @@ def threads(
     default=5,
     help="Maximum concurrent trace fetches (default: 5, max recommended: 10)",
 )
+@click.option(
+    "--include-metadata",
+    is_flag=True,
+    default=False,
+    help="Include run metadata (status, timing, tokens, costs) in output",
+)
+@click.option(
+    "--include-feedback",
+    is_flag=True,
+    default=False,
+    help="Include feedback data in output (requires extra API call)",
+)
 def traces(
     output_dir,
     project_uuid,
@@ -568,6 +598,8 @@ def traces(
     output_file,
     no_progress,
     max_concurrent,
+    include_metadata,
+    include_feedback,
 ):
     """Fetch recent traces from LangSmith BY CHRONOLOGICAL TIME.
 
@@ -689,6 +721,8 @@ def traces(
                 max_workers=max_concurrent,
                 show_progress=not no_progress,
                 return_timing=True,
+                include_metadata=include_metadata,
+                include_feedback=include_feedback,
             )
         except ValueError as e:
             click.echo(f"Error: {e}", err=True)
@@ -724,12 +758,18 @@ def traces(
                 json.dump(trace_data, f, indent=2, default=str)
 
             # Show summary of saved data
-            messages_count = len(trace_data.get("messages", []))
-            feedback_count = len(trace_data.get("feedback", []))
-            status = trace_data.get("metadata", {}).get("status", "unknown")
-            summary = f"{messages_count} messages, status: {status}"
-            if feedback_count > 0:
-                summary += f", {feedback_count} feedback"
+            # Handle both list (include_metadata=False) and dict (include_metadata=True) cases
+            if isinstance(trace_data, dict):
+                messages_count = len(trace_data.get("messages", []))
+                feedback_count = len(trace_data.get("feedback", []))
+                status = trace_data.get("metadata", {}).get("status", "unknown")
+                summary = f"{messages_count} messages, status: {status}"
+                if feedback_count > 0:
+                    summary += f", {feedback_count} feedback"
+            else:
+                # trace_data is a list of messages
+                messages_count = len(trace_data)
+                summary = f"{messages_count} messages"
 
             click.echo(f"  ✓ Saved {trace_id} to {safe_filename} ({summary})")
 
@@ -744,7 +784,7 @@ def traces(
             format_type = config.get_default_format()
 
         try:
-            # Fetch traces with metadata and feedback
+            # Fetch traces
             traces_data = fetchers.fetch_recent_traces(
                 api_key=api_key,
                 base_url=base_url,
@@ -755,6 +795,8 @@ def traces(
                 max_workers=max_concurrent,
                 show_progress=not no_progress,
                 return_timing=False,
+                include_metadata=include_metadata,
+                include_feedback=include_feedback,
             )
 
             # For limit=1, output single trace directly
