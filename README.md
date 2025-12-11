@@ -108,6 +108,183 @@ langsmith-fetch traces ./my-traces --limit 10
 langsmith-fetch threads ./my-threads --limit 10
 ```
 
+### Output Structure (v0.3.0+)
+
+Starting from version 0.3.0, all fetch commands return structured data that includes:
+
+**Metadata:**
+- Run status (success/error/pending)
+- Timing information (start, end, duration)
+- Token usage (prompt, completion, total)
+- Costs (prompt, completion, total)
+- Custom metadata from runs
+- Feedback statistics summary
+
+**Feedback:**
+- Full feedback objects with scores, comments, and corrections
+- Only fetched when feedback exists (smart fetching)
+- Includes feedback keys, scores, values, and timestamps
+
+**Example Output Structure:**
+
+```json
+{
+  "trace_id": "3b0b15fe-1e3a-4aef-afa8-48df15879cfe",
+  "messages": [
+    {
+      "type": "human",
+      "content": "Can we meet next Tuesday?",
+      "id": "964d69c7-10e2-4de2-89c9-4361c9ea5da7"
+    },
+    {
+      "type": "ai",
+      "content": [{"type": "tool_use", "name": "triage_email", "input": {...}}]
+    }
+  ],
+  "metadata": {
+    "status": "success",
+    "start_time": "2025-12-11T10:00:00.123Z",
+    "end_time": "2025-12-11T10:00:05.456Z",
+    "duration_ms": 5333,
+    "custom_metadata": {
+      "user_id": "user-123",
+      "thread_id": "test-email-agent-thread"
+    },
+    "token_usage": {
+      "prompt_tokens": 1234,
+      "completion_tokens": 567,
+      "total_tokens": 1801
+    },
+    "costs": {
+      "prompt_cost": 0.01234,
+      "completion_cost": 0.00567,
+      "total_cost": 0.01801
+    },
+    "feedback_stats": {
+      "thumbs_up": 3,
+      "thumbs_down": 1
+    }
+  },
+  "feedback": [
+    {
+      "id": "fb-uuid-1",
+      "key": "thumbs_up",
+      "score": 1,
+      "comment": "Great classification!",
+      "created_at": "2025-12-11T10:05:00.000Z"
+    }
+  ]
+}
+```
+
+**Pretty Format Output:**
+
+When using `--format pretty`, the output includes formatted sections for metadata and feedback before displaying messages:
+
+```
+============================================================
+RUN METADATA
+============================================================
+Status: success
+Start Time: 2025-12-11T10:00:00.123Z
+Duration: 5333ms
+
+Token Usage:
+  Prompt: 1234
+  Completion: 567
+  Total: 1801
+
+Costs:
+  Total: $0.01801
+  Prompt: $0.01234
+  Completion: $0.00567
+
+Custom Metadata:
+  user_id: user-123
+
+Feedback Stats:
+  thumbs_up: 3
+  thumbs_down: 1
+
+============================================================
+FEEDBACK
+============================================================
+
+Feedback 1:
+  Key: thumbs_up
+  Score: 1
+  Comment: Great classification!
+  Created: 2025-12-11T10:05:00.000Z
+
+============================================================
+MESSAGES
+============================================================
+[messages displayed here]
+```
+
+### Migration Guide (v0.2.x → v0.3.0)
+
+**Breaking Change:** The output format has changed from a flat list of messages to a structured object with messages, metadata, and feedback.
+
+**Before (v0.2.x):**
+```json
+[
+  {"role": "user", "content": "..."},
+  {"role": "assistant", "content": "..."}
+]
+```
+
+**After (v0.3.0):**
+```json
+{
+  "trace_id": "...",
+  "messages": [
+    {"type": "human", "content": "..."},
+    {"type": "ai", "content": "..."}
+  ],
+  "metadata": {...},
+  "feedback": [...]
+}
+```
+
+**To Update Your Scripts:**
+
+If you're processing the JSON output, update your code to access the `.messages` field:
+
+```bash
+# Before (v0.2.x):
+cat trace.json | jq '.[0].content'
+
+# After (v0.3.0):
+cat trace.json | jq '.messages[0].content'
+```
+
+```python
+# Before (v0.2.x):
+import json
+with open('trace.json') as f:
+    messages = json.load(f)
+    first_message = messages[0]
+
+# After (v0.3.0):
+import json
+with open('trace.json') as f:
+    trace_data = json.load(f)
+    messages = trace_data['messages']
+    metadata = trace_data['metadata']
+    feedback = trace_data['feedback']
+    first_message = messages[0]
+```
+
+**Why This Change?**
+
+The new format provides:
+- **Rich context**: Understand run performance, costs, and status at a glance
+- **Feedback integration**: See user feedback directly alongside traces
+- **Better debugging**: Metadata helps identify slow runs or errors quickly
+- **Zero extra cost**: Metadata is extracted from existing API responses (no additional API calls)
+- **Smart feedback fetching**: Only fetches feedback when it exists, minimizing API overhead
+
 ## Features
 
 ### Understanding LangSmith Data Organization

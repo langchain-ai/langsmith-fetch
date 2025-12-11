@@ -267,7 +267,9 @@ def _fetch_traces_concurrent(
     api_key: str,
     max_workers: int = 5,
     show_progress: bool = True,
-) -> tuple[list[tuple[str, list[dict[str, Any]]]], dict[str, float]]:
+    include_metadata: bool = False,
+    include_feedback: bool = False,
+) -> tuple[list[tuple[str, list[dict[str, Any]] | dict[str, Any]]], dict[str, float]]:
     """Fetch multiple traces concurrently with optional progress display.
 
     Args:
@@ -276,9 +278,13 @@ def _fetch_traces_concurrent(
         api_key: LangSmith API key
         max_workers: Maximum number of concurrent requests (default: 5)
         show_progress: Whether to show progress bar (default: True)
+        include_metadata: Whether to include metadata in results (default: False)
+        include_feedback: Whether to fetch full feedback objects (default: False)
 
     Returns:
         Tuple of (results list, timing_info dict)
+        If include_metadata=False: results are (trace_id, messages) tuples (backward compatible)
+        If include_metadata=True: results are (trace_id, trace_data_dict) tuples
     """
     results = []
     timing_info = {
@@ -288,6 +294,16 @@ def _fetch_traces_concurrent(
         "traces_failed": 0,
     }
 
+    # Extract metadata from Run objects we already have (no extra API calls!)
+    run_metadata_map = {}
+    runs_with_feedback = []
+    if include_metadata:
+        for run in runs:
+            trace_id = str(run.id)
+            run_metadata_map[trace_id] = _extract_run_metadata_from_sdk_run(run)
+            if include_feedback and _sdk_run_has_feedback(run):
+                runs_with_feedback.append(trace_id)
+
     # For single trace, use simple sequential fetch (no progress overhead)
     if len(runs) == 1:
         trace_id = str(runs[0].id)
@@ -295,7 +311,18 @@ def _fetch_traces_concurrent(
             start = perf_counter()
             messages = fetch_trace(trace_id, base_url=base_url, api_key=api_key)
             duration = perf_counter() - start
-            results.append((trace_id, messages))
+
+            if include_metadata:
+                trace_data = {
+                    "trace_id": trace_id,
+                    "messages": messages,
+                    "metadata": run_metadata_map[trace_id],
+                    "feedback": [],
+                }
+                results.append((trace_id, trace_data))
+            else:
+                results.append((trace_id, messages))
+
             timing_info["traces_succeeded"] = 1
             timing_info["individual_timings"] = [duration]
         except Exception as e:
@@ -304,6 +331,15 @@ def _fetch_traces_concurrent(
             timing_info["individual_timings"] = []
 
         timing_info["fetch_duration"] = perf_counter() - timing_info["fetch_start"]
+
+        # Fetch feedback for single trace if needed
+        if include_metadata and include_feedback and runs_with_feedback and results:
+            feedback_map = _fetch_feedback_batch(runs_with_feedback, api_key, max_workers=1)
+            if results:
+                trace_id, trace_data = results[0]
+                if trace_id in feedback_map:
+                    trace_data["feedback"] = feedback_map[trace_id]
+
         return results, timing_info
 
     # Concurrent fetching with progress for multiple traces
@@ -343,7 +379,17 @@ def _fetch_traces_concurrent(
                     print(msg, file=sys.stderr)
                 timing_info["traces_failed"] += 1
             else:
-                results.append((trace_id, messages))
+                if include_metadata:
+                    trace_data = {
+                        "trace_id": trace_id,
+                        "messages": messages,
+                        "metadata": run_metadata_map.get(trace_id, {}),
+                        "feedback": [],
+                    }
+                    results.append((trace_id, trace_data))
+                else:
+                    results.append((trace_id, messages))
+
                 timing_info["traces_succeeded"] += 1
 
             if show_progress:
@@ -359,6 +405,17 @@ def _fetch_traces_concurrent(
             timing_info["fetch_duration"] / timing_info["traces_succeeded"]
         )
 
+    # Batch fetch feedback for all runs that have it
+    if include_metadata and include_feedback and runs_with_feedback:
+        feedback_start = perf_counter()
+        feedback_map = _fetch_feedback_batch(runs_with_feedback, api_key, max_workers)
+        timing_info["feedback_duration"] = perf_counter() - feedback_start
+
+        # Add feedback to corresponding traces
+        for idx, (trace_id, trace_data) in enumerate(results):
+            if trace_id in feedback_map:
+                trace_data["feedback"] = feedback_map[trace_id]
+
     return results, timing_info
 
 
@@ -372,12 +429,14 @@ def fetch_recent_traces(
     max_workers: int = 5,
     show_progress: bool = True,
     return_timing: bool = False,
-) -> list[tuple[str, list[dict[str, Any]]]] | tuple[list[tuple[str, list[dict[str, Any]]]], dict]:
+    include_metadata: bool = True,
+    include_feedback: bool = True,
+) -> list[tuple[str, list[dict[str, Any]] | dict[str, Any]]] | tuple[list[tuple[str, list[dict[str, Any]] | dict[str, Any]]], dict]:
     """Fetch multiple recent traces from LangSmith with concurrent fetching.
 
     Searches for recent root traces by chronological timestamp and returns
-    their messages. Uses concurrent fetching for improved performance when
-    fetching multiple traces.
+    their messages with metadata and feedback. Uses concurrent fetching for
+    improved performance when fetching multiple traces.
 
     Args:
         api_key: LangSmith API key for authentication
@@ -392,10 +451,14 @@ def fetch_recent_traces(
         max_workers: Maximum number of concurrent fetch requests (default: 5)
         show_progress: Whether to show progress bar during fetching (default: True)
         return_timing: Whether to return timing information along with results (default: False)
+        include_metadata: Whether to include metadata in results (default: True)
+        include_feedback: Whether to fetch full feedback objects (default: True)
 
     Returns:
         If return_timing=False (default):
-            List of tuples (trace_id, messages) for each trace, ordered by most recent first.
+            If include_metadata=False: List of (trace_id, messages) tuples
+            If include_metadata=True: List of (trace_id, trace_data_dict) tuples where
+                trace_data_dict contains messages, metadata, and feedback
         If return_timing=True:
             Tuple of (traces list, timing_dict) where timing_dict contains performance metrics.
 
@@ -412,8 +475,10 @@ def fetch_recent_traces(
         ...     last_n_minutes=30,
         ...     max_workers=5
         ... )
-        >>> for trace_id, messages in traces:
-        ...     print(f"Trace {trace_id}: {len(messages)} messages")
+        >>> for trace_id, trace_data in traces:
+        ...     print(f"Trace {trace_id}: {len(trace_data['messages'])} messages")
+        ...     print(f"  Status: {trace_data['metadata']['status']}")
+        ...     print(f"  Feedback: {len(trace_data['feedback'])} items")
     """
     if not HAS_LANGSMITH:
         raise Exception(
@@ -455,13 +520,15 @@ def fetch_recent_traces(
     if not runs:
         raise ValueError("No traces found matching criteria")
 
-    # Fetch messages for each trace using concurrent fetching
+    # Fetch messages (and metadata/feedback if requested) for each trace using concurrent fetching
     results, timing_info = _fetch_traces_concurrent(
         runs=runs,
         base_url=base_url,
         api_key=api_key,
         max_workers=max_workers,
         show_progress=show_progress,
+        include_metadata=include_metadata,
+        include_feedback=include_feedback,
     )
 
     if not results:
@@ -476,3 +543,346 @@ def fetch_recent_traces(
     if return_timing:
         return results, timing_info
     return results
+
+
+# ============================================================================
+# Metadata and Feedback Extraction Helpers
+# ============================================================================
+
+
+def _extract_run_metadata(run_data: dict) -> dict[str, Any]:
+    """Extract metadata from a Run object (REST API response).
+
+    Args:
+        run_data: Run object dict from REST API response
+
+    Returns:
+        Dictionary with extracted metadata fields
+    """
+    from datetime import datetime
+
+    extra = run_data.get("extra") or {}
+    custom_metadata = extra.get("metadata") or {}
+
+    # Calculate duration if we have both start and end times
+    duration_ms = None
+    start_time = run_data.get("start_time")
+    end_time = run_data.get("end_time")
+    if start_time and end_time:
+        try:
+            start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+            end_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+            duration_ms = int((end_dt - start_dt).total_seconds() * 1000)
+        except (ValueError, AttributeError):
+            pass
+
+    return {
+        "status": run_data.get("status"),
+        "start_time": start_time,
+        "end_time": end_time,
+        "duration_ms": duration_ms,
+        "custom_metadata": custom_metadata,
+        "token_usage": {
+            "prompt_tokens": run_data.get("prompt_tokens"),
+            "completion_tokens": run_data.get("completion_tokens"),
+            "total_tokens": run_data.get("total_tokens"),
+        },
+        "costs": {
+            "prompt_cost": run_data.get("prompt_cost"),
+            "completion_cost": run_data.get("completion_cost"),
+            "total_cost": run_data.get("total_cost"),
+        },
+        "first_token_time": run_data.get("first_token_time"),
+        "feedback_stats": run_data.get("feedback_stats") or {},
+    }
+
+
+def _extract_run_metadata_from_sdk_run(run) -> dict[str, Any]:
+    """Extract metadata from an SDK Run object.
+
+    Args:
+        run: Run object from langsmith SDK
+
+    Returns:
+        Dictionary with extracted metadata fields
+    """
+    # Calculate duration if we have both start and end times
+    duration_ms = None
+    if hasattr(run, "start_time") and hasattr(run, "end_time") and run.start_time and run.end_time:
+        try:
+            duration_ms = int((run.end_time - run.start_time).total_seconds() * 1000)
+        except (AttributeError, TypeError):
+            pass
+
+    # Extract custom metadata from extra field
+    custom_metadata = {}
+    if hasattr(run, "extra") and run.extra:
+        custom_metadata = run.extra.get("metadata") or {}
+
+    return {
+        "status": getattr(run, "status", None),
+        "start_time": run.start_time.isoformat() if hasattr(run, "start_time") and run.start_time else None,
+        "end_time": run.end_time.isoformat() if hasattr(run, "end_time") and run.end_time else None,
+        "duration_ms": duration_ms,
+        "custom_metadata": custom_metadata,
+        "token_usage": {
+            "prompt_tokens": getattr(run, "prompt_tokens", None),
+            "completion_tokens": getattr(run, "completion_tokens", None),
+            "total_tokens": getattr(run, "total_tokens", None),
+        },
+        "costs": {
+            "prompt_cost": getattr(run, "prompt_cost", None),
+            "completion_cost": getattr(run, "completion_cost", None),
+            "total_cost": getattr(run, "total_cost", None),
+        },
+        "first_token_time": getattr(run, "first_token_time", None),
+        "feedback_stats": getattr(run, "feedback_stats", None) or {},
+    }
+
+
+def _has_feedback(metadata: dict) -> bool:
+    """Check if metadata indicates feedback exists.
+
+    Args:
+        metadata: Metadata dict with feedback_stats
+
+    Returns:
+        True if feedback_stats shows any feedback exists
+    """
+    feedback_stats = metadata.get("feedback_stats") or {}
+    if not feedback_stats:
+        return False
+
+    # Check if any feedback count is positive
+    return any(
+        isinstance(v, (int, float)) and v > 0
+        for v in feedback_stats.values()
+    )
+
+
+def _sdk_run_has_feedback(run) -> bool:
+    """Check if SDK Run object has feedback.
+
+    Args:
+        run: SDK Run object
+
+    Returns:
+        True if feedback_stats shows any feedback exists
+    """
+    feedback_stats = getattr(run, "feedback_stats", None) or {}
+    if not feedback_stats:
+        return False
+
+    return any(
+        isinstance(v, (int, float)) and v > 0
+        for v in feedback_stats.values()
+    )
+
+
+def _serialize_feedback(fb) -> dict[str, Any]:
+    """Convert SDK Feedback object to dictionary.
+
+    Args:
+        fb: Feedback object from langsmith SDK
+
+    Returns:
+        Dictionary with feedback fields
+    """
+    return {
+        "id": str(fb.id) if hasattr(fb, "id") else None,
+        "key": getattr(fb, "key", None),
+        "score": getattr(fb, "score", None),
+        "value": getattr(fb, "value", None),
+        "comment": getattr(fb, "comment", None),
+        "correction": getattr(fb, "correction", None),
+        "created_at": fb.created_at.isoformat() if hasattr(fb, "created_at") and fb.created_at else None,
+    }
+
+
+def _fetch_feedback(run_id: str, *, api_key: str) -> list[dict[str, Any]]:
+    """Fetch full feedback objects for a single run.
+
+    Args:
+        run_id: Run UUID to fetch feedback for
+        api_key: LangSmith API key
+
+    Returns:
+        List of feedback dictionaries
+    """
+    if not HAS_LANGSMITH:
+        return []
+
+    from langsmith import Client
+
+    try:
+        client = Client(api_key=api_key)
+        feedback_list = list(client.list_feedback(run_id=run_id))
+        return [_serialize_feedback(fb) for fb in feedback_list]
+    except Exception as e:
+        print(f"Warning: Failed to fetch feedback for run {run_id}: {e}", file=sys.stderr)
+        return []
+
+
+def _fetch_feedback_batch(
+    run_ids: list[str],
+    api_key: str,
+    max_workers: int = 5,
+) -> dict[str, list[dict[str, Any]]]:
+    """Fetch feedback for multiple runs concurrently.
+
+    Args:
+        run_ids: List of run UUIDs to fetch feedback for
+        api_key: LangSmith API key
+        max_workers: Maximum concurrent requests (default: 5)
+
+    Returns:
+        Dictionary mapping run_id -> list of feedback dicts
+    """
+    if not HAS_LANGSMITH or not run_ids:
+        return {}
+
+    def fetch_single(run_id: str) -> tuple[str, list[dict[str, Any]]]:
+        """Fetch feedback for a single run with error handling."""
+        try:
+            feedback = _fetch_feedback(run_id, api_key=api_key)
+            return run_id, feedback
+        except Exception:
+            return run_id, []
+
+    results = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(fetch_single, rid) for rid in run_ids]
+        for future in as_completed(futures):
+            run_id, feedback = future.result()
+            if feedback:
+                results[run_id] = feedback
+
+    return results
+
+
+# ============================================================================
+# New Fetchers with Metadata and Feedback Support
+# ============================================================================
+
+
+def fetch_trace_with_metadata(
+    trace_id: str,
+    *,
+    base_url: str,
+    api_key: str,
+    include_feedback: bool = True,
+) -> dict[str, Any]:
+    """Fetch trace with metadata and optional feedback.
+
+    Args:
+        trace_id: LangSmith trace UUID
+        base_url: LangSmith base URL
+        api_key: LangSmith API key
+        include_feedback: Whether to fetch full feedback objects (default: True)
+
+    Returns:
+        Dictionary with keys:
+            - trace_id: Trace UUID
+            - messages: List of message dictionaries
+            - metadata: Metadata dict with status, timing, tokens, costs, etc.
+            - feedback: List of feedback dicts (empty if no feedback or include_feedback=False)
+
+    Raises:
+        requests.HTTPError: If the API request fails
+    """
+    headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
+    url = f"{base_url}/runs/{trace_id}?include_messages=true"
+
+    response = requests.get(url, headers=headers)
+    response.raise_for_status()
+
+    data = response.json()
+
+    # Extract messages
+    messages = data.get("messages") or (data.get("outputs") or {}).get("messages") or []
+
+    # Extract metadata from the full Run object
+    metadata = _extract_run_metadata(data)
+
+    # Fetch feedback if requested and feedback exists
+    feedback = []
+    if include_feedback and _has_feedback(metadata):
+        feedback = _fetch_feedback(trace_id, api_key=api_key)
+
+    return {
+        "trace_id": trace_id,
+        "messages": messages,
+        "metadata": metadata,
+        "feedback": feedback,
+    }
+
+
+def fetch_thread_with_metadata(
+    thread_id: str,
+    project_uuid: str,
+    *,
+    base_url: str,
+    api_key: str,
+    include_feedback: bool = True,
+) -> dict[str, Any]:
+    """Fetch thread with metadata from root run and optional feedback.
+
+    Args:
+        thread_id: LangGraph thread_id
+        project_uuid: LangSmith project UUID
+        base_url: LangSmith base URL
+        api_key: LangSmith API key
+        include_feedback: Whether to fetch full feedback objects (default: True)
+
+    Returns:
+        Dictionary with keys:
+            - thread_id: Thread ID
+            - messages: List of message dictionaries
+            - metadata: Metadata from most recent root run (empty dict if no run found)
+            - feedback: List of feedback dicts
+
+    Raises:
+        requests.HTTPError: If the API request fails
+    """
+    # Fetch messages using existing function
+    messages = fetch_thread(thread_id, project_uuid, base_url=base_url, api_key=api_key)
+
+    # Try to find the root run for this thread to get metadata
+    metadata = {}
+    feedback = []
+
+    if HAS_LANGSMITH:
+        try:
+            from langsmith import Client
+
+            client = Client(api_key=api_key)
+
+            # Query for root runs with this thread_id (most recent first)
+            runs = list(
+                client.list_runs(
+                    project_id=project_uuid,
+                    filter=f'and(eq(is_root, true), eq(extra.metadata.thread_id, "{thread_id}"))',
+                    limit=1,
+                )
+            )
+
+            if runs:
+                root_run = runs[0]
+                metadata = _extract_run_metadata_from_sdk_run(root_run)
+
+                # Fetch feedback if requested and feedback exists
+                if include_feedback and _sdk_run_has_feedback(root_run):
+                    feedback = _fetch_feedback(str(root_run.id), api_key=api_key)
+
+        except Exception as e:
+            print(
+                f"Warning: Failed to fetch metadata for thread {thread_id}: {e}",
+                file=sys.stderr,
+            )
+
+    return {
+        "thread_id": thread_id,
+        "messages": messages,
+        "metadata": metadata,
+        "feedback": feedback,
+    }
