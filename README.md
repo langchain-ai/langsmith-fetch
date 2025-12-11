@@ -37,6 +37,13 @@ Start your favorite coding agent and ask questions like the following. Many agen
 
 ## Direct Usage
 
+**Fetch recent traces**
+```bash
+# Fetch 2 most recent traces
+langsmith-fetch threads --limit 2
+```
+<img width="1419" height="304" alt="Screenshot 2025-12-10 at 9 50 39 PM" src="https://github.com/user-attachments/assets/ee0cb14a-0608-44f7-a2e9-1043a42b8be5" />
+
 **Fetch recent threads to a directory (RECOMMENDED):**
 
 ```bash
