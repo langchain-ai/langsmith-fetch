@@ -120,9 +120,13 @@ class TestThreadCommand:
 
     @responses.activate
     def test_thread_default_format_with_config(
-        self, sample_thread_response, mock_env_api_key, temp_config_dir
+        self, sample_thread_response, mock_env_api_key, temp_config_dir, monkeypatch
     ):
         """Test thread command with default format and config."""
+        # Clear env vars to test config fallback
+        monkeypatch.delenv("LANGSMITH_PROJECT", raising=False)
+        monkeypatch.delenv("LANGSMITH_PROJECT_UUID", raising=False)
+
         # Set up config
         with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
             with patch(
@@ -147,9 +151,13 @@ class TestThreadCommand:
 
     @responses.activate
     def test_thread_pretty_format(
-        self, sample_thread_response, mock_env_api_key, temp_config_dir
+        self, sample_thread_response, mock_env_api_key, temp_config_dir, monkeypatch
     ):
         """Test thread command with explicit pretty format."""
+        # Clear env vars to test config fallback
+        monkeypatch.delenv("LANGSMITH_PROJECT", raising=False)
+        monkeypatch.delenv("LANGSMITH_PROJECT_UUID", raising=False)
+
         with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
             with patch(
                 "langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"
@@ -175,9 +183,13 @@ class TestThreadCommand:
 
     @responses.activate
     def test_thread_json_format(
-        self, sample_thread_response, mock_env_api_key, temp_config_dir
+        self, sample_thread_response, mock_env_api_key, temp_config_dir, monkeypatch
     ):
         """Test thread command with json format."""
+        # Clear env vars to test config fallback
+        monkeypatch.delenv("LANGSMITH_PROJECT", raising=False)
+        monkeypatch.delenv("LANGSMITH_PROJECT_UUID", raising=False)
+
         with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
             with patch(
                 "langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"
@@ -203,9 +215,13 @@ class TestThreadCommand:
 
     @responses.activate
     def test_thread_raw_format(
-        self, sample_thread_response, mock_env_api_key, temp_config_dir
+        self, sample_thread_response, mock_env_api_key, temp_config_dir, monkeypatch
     ):
         """Test thread command with raw format."""
+        # Clear env vars to test config fallback
+        monkeypatch.delenv("LANGSMITH_PROJECT", raising=False)
+        monkeypatch.delenv("LANGSMITH_PROJECT_UUID", raising=False)
+
         with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
             with patch(
                 "langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"
@@ -287,9 +303,13 @@ class TestThreadsCommand:
 
     @responses.activate
     def test_threads_default_limit(
-        self, sample_thread_response, mock_env_api_key, temp_config_dir, tmp_path
+        self, sample_thread_response, mock_env_api_key, temp_config_dir, tmp_path, monkeypatch
     ):
         """Test threads command with default limit (1)."""
+        # Clear env vars to test config fallback
+        monkeypatch.delenv("LANGSMITH_PROJECT", raising=False)
+        monkeypatch.delenv("LANGSMITH_PROJECT_UUID", raising=False)
+
         with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
             with patch(
                 "langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"
@@ -341,9 +361,13 @@ class TestThreadsCommand:
 
     @responses.activate
     def test_threads_custom_limit(
-        self, sample_thread_response, mock_env_api_key, temp_config_dir, tmp_path
+        self, sample_thread_response, mock_env_api_key, temp_config_dir, tmp_path, monkeypatch
     ):
         """Test threads command with custom limit."""
+        # Clear env vars to test config fallback
+        monkeypatch.delenv("LANGSMITH_PROJECT", raising=False)
+        monkeypatch.delenv("LANGSMITH_PROJECT_UUID", raising=False)
+
         with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
             with patch(
                 "langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"
@@ -400,9 +424,13 @@ class TestThreadsCommand:
 
     @responses.activate
     def test_threads_custom_filename_pattern(
-        self, sample_thread_response, mock_env_api_key, temp_config_dir, tmp_path
+        self, sample_thread_response, mock_env_api_key, temp_config_dir, tmp_path, monkeypatch
     ):
         """Test threads command with custom filename pattern."""
+        # Clear env vars to test config fallback
+        monkeypatch.delenv("LANGSMITH_PROJECT", raising=False)
+        monkeypatch.delenv("LANGSMITH_PROJECT_UUID", raising=False)
+
         with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
             with patch(
                 "langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"

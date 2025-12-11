@@ -77,6 +77,26 @@ def set_config_value(key: str, value: str):
     config[key] = value
     save_config(config)
 
+    # If manually setting project_uuid, clear in-memory cache
+    # to force re-validation on next lookup
+    if key in ("project-uuid", "project_uuid"):
+        _project_uuid_cache.clear()
+
+
+def _update_project_config(project_name: str, project_uuid: str):
+    """
+    Update config file with both project name and UUID atomically.
+
+    Args:
+        project_name: Project name to store
+        project_uuid: Project UUID to store
+    """
+    # Load, update both fields, and save atomically
+    config = load_config()
+    config["project-name"] = project_name
+    config["project-uuid"] = project_uuid
+    save_config(config)
+
 
 def _lookup_project_uuid_by_name(
     project_name: str,
@@ -144,73 +164,87 @@ def get_base_url() -> str | None:
 
 def get_project_uuid() -> str | None:
     """
-    Get project UUID from config, env var, or by looking up LANGSMITH_PROJECT.
+    Get project UUID with automatic sync detection.
 
     Priority order:
-    1. Config file (project_uuid)
-    2. LANGSMITH_PROJECT_UUID env var (explicit UUID)
-    3. LANGSMITH_PROJECT env var → API lookup → cached
+    1. LANGSMITH_PROJECT_UUID env var (explicit UUID override)
+    2. LANGSMITH_PROJECT env var → check if config matches → fetch if stale
+    3. Config file as fallback (when no env var set)
 
     Returns:
-        Project UUID from config file, env var, or looked up by name, or None
+        Project UUID or None
     """
-    # Priority 1: Config file
-    if config_uuid := get_config_value("project_uuid"):
-        return config_uuid
+    import sys
 
-    # Priority 2: Direct UUID from env var
-    if env_uuid := os.environ.get("LANGSMITH_PROJECT_UUID"):
+    # Priority 1: Explicit UUID override (bypasses all config logic)
+    env_uuid = os.environ.get("LANGSMITH_PROJECT_UUID")
+    if env_uuid:
         return env_uuid
 
-    # Priority 3: Project name from env var → lookup
-    project_name = os.environ.get("LANGSMITH_PROJECT")
-    if not project_name:
+    # Get current project name from env var
+    env_project_name = os.environ.get("LANGSMITH_PROJECT")
+
+    # Load config values
+    config_project_uuid = get_config_value("project_uuid")
+    config_project_name = get_config_value("project_name")
+
+    # Case 1: No env var set - use config as default
+    if not env_project_name:
+        if config_project_uuid:
+            return config_project_uuid
         return None
 
-    # Check cache first
-    if project_name in _project_uuid_cache:
-        return _project_uuid_cache[project_name]
+    # Case 2: Env var IS set - check if it matches config
 
-    # Lookup via API
+    # Check in-memory cache first (keyed by project name)
+    if env_project_name in _project_uuid_cache:
+        cached_uuid = _project_uuid_cache[env_project_name]
+        # If config is out of sync, update it
+        if cached_uuid and config_project_name != env_project_name:
+            _update_project_config(env_project_name, cached_uuid)
+        return cached_uuid
+
+    # Config matches env var - use cached UUID
+    if config_project_name == env_project_name and config_project_uuid:
+        # Add to in-memory cache
+        _project_uuid_cache[env_project_name] = config_project_uuid
+        return config_project_uuid
+
+    # Config doesn't match (or doesn't exist) - need to fetch
+    print(f"Project name changed to '{env_project_name}', fetching UUID...", file=sys.stderr)
+
+    # Validate we have API key before attempting lookup
+    api_key = get_api_key()
+    if not api_key:
+        print(
+            "Warning: LANGSMITH_PROJECT set but no API key found. "
+            "Set LANGSMITH_API_KEY to enable project lookup.",
+            file=sys.stderr
+        )
+        return None
+
+    base_url = get_base_url()
+
+    # Fetch UUID via API
     try:
-        # Need API key for lookup
-        api_key = get_api_key()
-        if not api_key:
-            import sys
-            print(
-                "Warning: LANGSMITH_PROJECT set but no API key found. "
-                "Set LANGSMITH_API_KEY to enable project lookup.",
-                file=sys.stderr
-            )
-            return None
+        uuid = _lookup_project_uuid_by_name(env_project_name, api_key, base_url)
 
-        base_url = get_base_url()
+        # Update in-memory cache
+        _project_uuid_cache[env_project_name] = uuid
 
-        # Inform user about lookup
-        import sys
-        print(f"Looking up project '{project_name}'...", file=sys.stderr)
+        # Update config with BOTH name and UUID
+        _update_project_config(env_project_name, uuid)
 
-        uuid = _lookup_project_uuid_by_name(project_name, api_key, base_url)
-
-        # Cache result in-memory
-        _project_uuid_cache[project_name] = uuid
-
-        # Persist to config file for future use
-        set_config_value("project_uuid", uuid)
-
-        print(f"Found project '{project_name}' (UUID: {uuid})", file=sys.stderr)
-        print(f"Saved project UUID to config file", file=sys.stderr)
+        print(f"Found project '{env_project_name}' (UUID: {uuid})", file=sys.stderr)
 
         return uuid
 
     except ValueError as e:
-        import sys
         print(f"Error: {e}", file=sys.stderr)
         return None
     except Exception as e:
-        import sys
         print(
-            f"Warning: Failed to lookup project '{project_name}': {e}",
+            f"Warning: Failed to lookup project '{env_project_name}': {e}",
             file=sys.stderr
         )
         return None
