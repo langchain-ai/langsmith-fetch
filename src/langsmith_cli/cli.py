@@ -697,9 +697,13 @@ def traces(
         fetch_time = timing_info.get("fetch_duration", 0)
         avg_time = timing_info.get("avg_per_trace", 0)
 
-        click.echo(f"Found {len(traces_data)} trace(s) in {total_time:.2f}s. Saving to {output_path}/")
+        click.echo(
+            f"Found {len(traces_data)} trace(s) in {total_time:.2f}s. Saving to {output_path}/"
+        )
         if len(traces_data) > 1 and avg_time > 0:
-            click.echo(f"  (Fetch time: {fetch_time:.2f}s, avg: {avg_time:.2f}s per trace)")
+            click.echo(
+                f"  (Fetch time: {fetch_time:.2f}s, avg: {avg_time:.2f}s per trace)"
+            )
 
         # Save each trace to file
         for index, (trace_id, messages) in enumerate(traces_data, start=1):
@@ -822,6 +826,7 @@ def config_cmd():
     AVAILABLE SETTINGS:
       project-uuid    LangSmith project UUID (required for thread fetching)
       api-key         LangSmith API key (alternative to LANGSMITH_API_KEY env var)
+      base-url        LangSmith base URL (alternative to LANGSMITH_ENDPOINT env var, defaults to https://api.smith.langchain.com)
       default-format  Default output format (raw, json, or pretty)
 
     \b
@@ -843,6 +848,7 @@ def config_set(key, value):
     Store a configuration setting persistently. Common keys include:
       - project-uuid: Required for fetching threads
       - api-key: LangSmith API key (alternative to env var)
+      - base-url: LangSmith base URL (alternative to env var, defaults to https://api.smith.langchain.com)
       - default-format: Output format (raw, json, or pretty)
 
     \b
