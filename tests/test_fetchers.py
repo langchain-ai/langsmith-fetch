@@ -364,8 +364,16 @@ class TestFetchRecentTraces:
         mock_client = Mock()
         mock_run1 = Mock()
         mock_run1.id = "trace-id-1"
+        mock_run1.feedback_stats = {}  # Empty dict, not a Mock
+        mock_run1.start_time = None
+        mock_run1.end_time = None
+        mock_run1.extra = {}
         mock_run2 = Mock()
         mock_run2.id = "trace-id-2"
+        mock_run2.feedback_stats = {}  # Empty dict, not a Mock
+        mock_run2.start_time = None
+        mock_run2.end_time = None
+        mock_run2.extra = {}
         mock_client.list_runs.return_value = [mock_run1, mock_run2]
         mock_client_class.return_value = mock_client
 
@@ -384,7 +392,8 @@ class TestFetchRecentTraces:
         )
 
         traces_data = fetchers.fetch_recent_traces(
-            api_key=TEST_API_KEY, base_url=TEST_BASE_URL, limit=2
+            api_key=TEST_API_KEY, base_url=TEST_BASE_URL, limit=2,
+            include_metadata=False, include_feedback=False
         )
 
         # Verify Client was instantiated with correct API key
@@ -425,6 +434,10 @@ class TestFetchRecentTraces:
         mock_client = Mock()
         mock_run = Mock()
         mock_run.id = TEST_TRACE_ID
+        mock_run.feedback_stats = {}
+        mock_run.start_time = None
+        mock_run.end_time = None
+        mock_run.extra = {}
         mock_client.list_runs.return_value = [mock_run]
         mock_client_class.return_value = mock_client
 
@@ -441,6 +454,8 @@ class TestFetchRecentTraces:
             base_url=TEST_BASE_URL,
             limit=1,
             project_uuid=TEST_PROJECT_UUID,
+            include_metadata=False,
+            include_feedback=False,
         )
 
         # Verify list_runs was called with project_id
@@ -462,6 +477,10 @@ class TestFetchRecentTraces:
         mock_client = Mock()
         mock_run = Mock()
         mock_run.id = TEST_TRACE_ID
+        mock_run.feedback_stats = {}
+        mock_run.start_time = None
+        mock_run.end_time = None
+        mock_run.extra = {}
         mock_client.list_runs.return_value = [mock_run]
         mock_client_class.return_value = mock_client
 
@@ -474,7 +493,8 @@ class TestFetchRecentTraces:
         )
 
         traces_data = fetchers.fetch_recent_traces(
-            api_key=TEST_API_KEY, base_url=TEST_BASE_URL, last_n_minutes=30
+            api_key=TEST_API_KEY, base_url=TEST_BASE_URL, last_n_minutes=30,
+            include_metadata=False, include_feedback=False
         )
 
         # Verify list_runs was called with start_time
@@ -495,6 +515,10 @@ class TestFetchRecentTraces:
         mock_client = Mock()
         mock_run = Mock()
         mock_run.id = TEST_TRACE_ID
+        mock_run.feedback_stats = {}
+        mock_run.start_time = None
+        mock_run.end_time = None
+        mock_run.extra = {}
         mock_client.list_runs.return_value = [mock_run]
         mock_client_class.return_value = mock_client
 
@@ -508,7 +532,8 @@ class TestFetchRecentTraces:
 
         since_timestamp = "2025-12-09T10:00:00Z"
         traces_data = fetchers.fetch_recent_traces(
-            api_key=TEST_API_KEY, base_url=TEST_BASE_URL, since=since_timestamp
+            api_key=TEST_API_KEY, base_url=TEST_BASE_URL, since=since_timestamp,
+            include_metadata=False, include_feedback=False
         )
 
         # Verify list_runs was called with start_time
