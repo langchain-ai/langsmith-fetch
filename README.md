@@ -100,11 +100,6 @@ LangSmith organizes data [into three levels](https://docs.langchain.com/langsmit
 **Thread ID** (for fetching specific threads):
 ![Thread ID location](images/thread_id.png)
 
-**Priority order** (highest to lowest):
-1. Config file (`~/.langsmith-cli/config.yaml`)
-2. `LANGSMITH_PROJECT_UUID` environment variable
-3. `LANGSMITH_PROJECT` environment variable (automatic lookup)
-
 ## Tests
 
 Run the test suite:
