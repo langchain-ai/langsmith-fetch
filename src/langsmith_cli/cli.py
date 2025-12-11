@@ -758,12 +758,18 @@ def traces(
                 json.dump(trace_data, f, indent=2, default=str)
 
             # Show summary of saved data
-            messages_count = len(trace_data.get("messages", []))
-            feedback_count = len(trace_data.get("feedback", []))
-            status = trace_data.get("metadata", {}).get("status", "unknown")
-            summary = f"{messages_count} messages, status: {status}"
-            if feedback_count > 0:
-                summary += f", {feedback_count} feedback"
+            # Handle both list (include_metadata=False) and dict (include_metadata=True) cases
+            if isinstance(trace_data, dict):
+                messages_count = len(trace_data.get("messages", []))
+                feedback_count = len(trace_data.get("feedback", []))
+                status = trace_data.get("metadata", {}).get("status", "unknown")
+                summary = f"{messages_count} messages, status: {status}"
+                if feedback_count > 0:
+                    summary += f", {feedback_count} feedback"
+            else:
+                # trace_data is a list of messages
+                messages_count = len(trace_data)
+                summary = f"{messages_count} messages"
 
             click.echo(f"  ✓ Saved {trace_id} to {safe_filename} ({summary})")
 
