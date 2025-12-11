@@ -429,8 +429,8 @@ def fetch_recent_traces(
     max_workers: int = 5,
     show_progress: bool = True,
     return_timing: bool = False,
-    include_metadata: bool = True,
-    include_feedback: bool = True,
+    include_metadata: bool = False,
+    include_feedback: bool = False,
 ) -> list[tuple[str, list[dict[str, Any]] | dict[str, Any]]] | tuple[list[tuple[str, list[dict[str, Any]] | dict[str, Any]]], dict]:
     """Fetch multiple recent traces from LangSmith with concurrent fetching.
 

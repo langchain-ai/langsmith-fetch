@@ -557,6 +557,18 @@ def threads(
     default=5,
     help="Maximum concurrent trace fetches (default: 5, max recommended: 10)",
 )
+@click.option(
+    "--include-metadata",
+    is_flag=True,
+    default=False,
+    help="Include run metadata (status, timing, tokens, costs) in output",
+)
+@click.option(
+    "--include-feedback",
+    is_flag=True,
+    default=False,
+    help="Include feedback data in output (requires extra API call)",
+)
 def traces(
     output_dir,
     project_uuid,
@@ -568,6 +580,8 @@ def traces(
     output_file,
     no_progress,
     max_concurrent,
+    include_metadata,
+    include_feedback,
 ):
     """Fetch recent traces from LangSmith BY CHRONOLOGICAL TIME.
 
@@ -689,6 +703,8 @@ def traces(
                 max_workers=max_concurrent,
                 show_progress=not no_progress,
                 return_timing=True,
+                include_metadata=include_metadata,
+                include_feedback=include_feedback,
             )
         except ValueError as e:
             click.echo(f"Error: {e}", err=True)
@@ -744,7 +760,7 @@ def traces(
             format_type = config.get_default_format()
 
         try:
-            # Fetch traces with metadata and feedback
+            # Fetch traces
             traces_data = fetchers.fetch_recent_traces(
                 api_key=api_key,
                 base_url=base_url,
@@ -755,6 +771,8 @@ def traces(
                 max_workers=max_concurrent,
                 show_progress=not no_progress,
                 return_timing=False,
+                include_metadata=include_metadata,
+                include_feedback=include_feedback,
             )
 
             # For limit=1, output single trace directly
