@@ -94,9 +94,11 @@ def fetch_recent_threads(
     limit: int = 10,
     last_n_minutes: int | None = None,
     since: str | None = None,
+    max_workers: int = 5,
+    show_progress: bool = True,
 ) -> list[tuple[str, list[dict[str, Any]]]]:
     """
-    Fetch recent threads for a project.
+    Fetch recent threads for a project with concurrent fetching.
 
     Args:
         project_uuid: LangSmith project UUID (session_id)
@@ -107,6 +109,8 @@ def fetch_recent_threads(
             from the last N minutes. Mutually exclusive with `since`.
         since: Optional ISO timestamp string (e.g., "2025-12-09T10:00:00Z").
             Only returns threads since this time. Mutually exclusive with `last_n_minutes`.
+        max_workers: Maximum concurrent thread fetches (default: 5)
+        show_progress: Whether to show progress bar (default: True)
 
     Returns:
         List of tuples (thread_id, messages) for each thread
@@ -164,18 +168,52 @@ def fetch_recent_threads(
             if len(thread_info) >= limit:
                 break
 
-    # Fetch messages for each thread
-    results = []
-    for thread_id in thread_info.keys():
+    # Fetch messages for each thread with concurrent fetching and progress bar
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+    import sys
+
+    def _fetch_thread_safe(thread_id: str) -> tuple[str, list[dict[str, Any]] | None]:
+        """Safe wrapper for fetch_thread that returns (thread_id, messages or None)."""
         try:
             messages = fetch_thread(
                 thread_id, project_uuid, base_url=base_url, api_key=api_key
             )
-            results.append((thread_id, messages))
+            return (thread_id, messages)
         except Exception as e:
-            # Log error but continue with other threads
-            print(f"Warning: Failed to fetch thread {thread_id}: {e}")
-            continue
+            print(f"Warning: Failed to fetch thread {thread_id}: {e}", file=sys.stderr)
+            return (thread_id, None)
+
+    results = []
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all fetch tasks
+        future_to_thread = {
+            executor.submit(_fetch_thread_safe, thread_id): thread_id
+            for thread_id in thread_info.keys()
+        }
+
+        # Use progress bar if requested
+        if show_progress:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[bold blue]Fetching {task.completed}/{task.total} threads..."),
+                BarColumn(),
+                TaskProgressColumn(),
+            ) as progress:
+                task = progress.add_task("fetch", total=len(future_to_thread))
+
+                for future in as_completed(future_to_thread):
+                    thread_id, messages = future.result()
+                    if messages is not None:
+                        results.append((thread_id, messages))
+                    progress.update(task, advance=1)
+        else:
+            # No progress bar - just collect results
+            for future in as_completed(future_to_thread):
+                thread_id, messages = future.result()
+                if messages is not None:
+                    results.append((thread_id, messages))
 
     return results
 
@@ -304,45 +342,7 @@ def _fetch_traces_concurrent(
             if include_feedback and _sdk_run_has_feedback(run):
                 runs_with_feedback.append(trace_id)
 
-    # For single trace, use simple sequential fetch (no progress overhead)
-    if len(runs) == 1:
-        trace_id = str(runs[0].id)
-        try:
-            start = perf_counter()
-            messages = fetch_trace(trace_id, base_url=base_url, api_key=api_key)
-            duration = perf_counter() - start
-
-            if include_metadata:
-                trace_data = {
-                    "trace_id": trace_id,
-                    "messages": messages,
-                    "metadata": run_metadata_map[trace_id],
-                    "feedback": [],
-                }
-                results.append((trace_id, trace_data))
-            else:
-                results.append((trace_id, messages))
-
-            timing_info["traces_succeeded"] = 1
-            timing_info["individual_timings"] = [duration]
-        except Exception as e:
-            print(f"Warning: Failed to fetch trace {trace_id}: {e}", file=sys.stderr)
-            timing_info["traces_failed"] = 1
-            timing_info["individual_timings"] = []
-
-        timing_info["fetch_duration"] = perf_counter() - timing_info["fetch_start"]
-
-        # Fetch feedback for single trace if needed
-        if include_metadata and include_feedback and runs_with_feedback and results:
-            feedback_map = _fetch_feedback_batch(runs_with_feedback, api_key, max_workers=1)
-            if results:
-                trace_id, trace_data = results[0]
-                if trace_id in feedback_map:
-                    trace_data["feedback"] = feedback_map[trace_id]
-
-        return results, timing_info
-
-    # Concurrent fetching with progress for multiple traces
+    # Concurrent fetching with progress (for all traces, including single)
     individual_timings = []
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:

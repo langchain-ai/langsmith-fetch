@@ -302,6 +302,18 @@ def trace(trace_id, format_type, output_file):
     type=click.Choice(["raw", "json", "pretty"]),
     help="Output format: raw (compact JSON), json (pretty JSON), pretty (human-readable panels)",
 )
+@click.option(
+    "--no-progress",
+    is_flag=True,
+    default=False,
+    help="Disable progress bar display during fetch",
+)
+@click.option(
+    "--max-concurrent",
+    type=int,
+    default=5,
+    help="Maximum concurrent thread fetches (default: 5, max recommended: 10)",
+)
 def threads(
     output_dir,
     project_uuid,
@@ -310,6 +322,8 @@ def threads(
     since,
     filename_pattern,
     format_type,
+    no_progress,
+    max_concurrent,
 ):
     """Fetch recent threads from LangSmith BY CHRONOLOGICAL TIME.
 
@@ -430,6 +444,8 @@ def threads(
                 limit,
                 last_n_minutes=last_n_minutes,
                 since=since,
+                max_workers=max_concurrent,
+                show_progress=not no_progress,
             )
         except ValueError as e:
             click.echo(f"Error: {e}", err=True)
@@ -478,6 +494,8 @@ def threads(
                 limit,
                 last_n_minutes=last_n_minutes,
                 since=since,
+                max_workers=max_concurrent,
+                show_progress=not no_progress,
             )
 
             if not threads_data:
