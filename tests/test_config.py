@@ -206,8 +206,12 @@ class TestConfigFunctions:
                 # Env var should take precedence over config
                 assert get_api_key() == "env_api_key"
 
-    def test_get_project_uuid(self, temp_config_dir):
-        """Test getting project UUID from config."""
+    def test_get_project_uuid(self, temp_config_dir, monkeypatch):
+        """Test getting project UUID from config when no env var set."""
+        # Clear env vars to test config fallback behavior
+        monkeypatch.delenv("LANGSMITH_PROJECT", raising=False)
+        monkeypatch.delenv("LANGSMITH_PROJECT_UUID", raising=False)
+
         with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
             with patch(
                 "langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"
@@ -253,8 +257,8 @@ class TestConfigFunctions:
 class TestProjectLookup:
     """Tests for automatic project UUID lookup from LANGSMITH_PROJECT."""
 
-    def test_get_project_uuid_priority_config_first(self, temp_config_dir, monkeypatch):
-        """Test that config file takes priority over env var lookup."""
+    def test_get_project_uuid_priority_explicit_uuid_wins(self, temp_config_dir, monkeypatch):
+        """Test that LANGSMITH_PROJECT_UUID env var takes highest priority."""
         monkeypatch.setenv("LANGSMITH_PROJECT", "my-project")
         monkeypatch.setenv("LANGSMITH_PROJECT_UUID", "env-uuid")
 
@@ -263,12 +267,13 @@ class TestProjectLookup:
                 from langsmith_cli.config import get_project_uuid, set_config_value
 
                 set_config_value("project-uuid", "config-uuid")
+                set_config_value("project-name", "old-project")
 
-                # Config file should win
-                assert get_project_uuid() == "config-uuid"
+                # LANGSMITH_PROJECT_UUID should always win (highest priority)
+                assert get_project_uuid() == "env-uuid"
 
-    def test_get_project_uuid_priority_env_uuid_second(self, temp_config_dir, monkeypatch):
-        """Test that LANGSMITH_PROJECT_UUID env var is second priority."""
+    def test_get_project_uuid_priority_env_uuid_no_lookup(self, temp_config_dir, monkeypatch):
+        """Test that LANGSMITH_PROJECT_UUID env var bypasses API lookup."""
         monkeypatch.setenv("LANGSMITH_PROJECT", "my-project")
         monkeypatch.setenv("LANGSMITH_PROJECT_UUID", "env-uuid")
 
@@ -366,3 +371,244 @@ class TestProjectLookup:
                 # Should return None with warning
                 result = get_project_uuid()
                 assert result is None
+
+    def test_project_name_change_triggers_refetch(self, temp_config_dir, monkeypatch):
+        """Test that changing project name triggers UUID re-fetch."""
+        from unittest.mock import Mock, MagicMock
+
+        monkeypatch.setenv("LANGSMITH_PROJECT", "new-project")
+        monkeypatch.setenv("LANGSMITH_API_KEY", TEST_API_KEY)
+
+        mock_project = Mock()
+        mock_project.id = "new-uuid"
+        mock_project.name = "new-project"
+
+        mock_client = MagicMock()
+        mock_client.read_project.return_value = mock_project
+
+        with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
+            with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
+                with patch("langsmith.Client", return_value=mock_client):
+                    from langsmith_cli.config import get_project_uuid, set_config_value, get_config_value, _project_uuid_cache
+
+                    # Clear cache
+                    _project_uuid_cache.clear()
+
+                    # Set old config
+                    set_config_value("project-name", "old-project")
+                    set_config_value("project-uuid", "old-uuid")
+
+                    # Should detect mismatch and fetch new UUID
+                    result = get_project_uuid()
+                    assert result == "new-uuid"
+                    assert mock_client.read_project.call_count == 1
+
+                    # Verify config was updated with both fields
+                    assert get_config_value("project-name") == "new-project"
+                    assert get_config_value("project-uuid") == "new-uuid"
+
+    def test_project_name_match_uses_cache(self, temp_config_dir, monkeypatch):
+        """Test that matching project name uses cached UUID without API call."""
+        from unittest.mock import MagicMock
+
+        monkeypatch.setenv("LANGSMITH_PROJECT", "test-project")
+        monkeypatch.setenv("LANGSMITH_API_KEY", TEST_API_KEY)
+
+        mock_client = MagicMock()
+
+        with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
+            with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
+                with patch("langsmith.Client", return_value=mock_client):
+                    from langsmith_cli.config import get_project_uuid, set_config_value, _project_uuid_cache
+
+                    # Clear cache
+                    _project_uuid_cache.clear()
+
+                    # Set matching config
+                    set_config_value("project-name", "test-project")
+                    set_config_value("project-uuid", "test-uuid")
+
+                    # Should use cached UUID without API call
+                    result = get_project_uuid()
+                    assert result == "test-uuid"
+                    assert mock_client.read_project.call_count == 0
+
+    def test_legacy_config_migration(self, temp_config_dir, monkeypatch):
+        """Test that legacy config (only project_uuid) triggers re-fetch and migration."""
+        from unittest.mock import Mock, MagicMock
+
+        monkeypatch.setenv("LANGSMITH_PROJECT", "test-project")
+        monkeypatch.setenv("LANGSMITH_API_KEY", TEST_API_KEY)
+
+        mock_project = Mock()
+        mock_project.id = "fetched-uuid"
+        mock_project.name = "test-project"
+
+        mock_client = MagicMock()
+        mock_client.read_project.return_value = mock_project
+
+        with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
+            with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
+                with patch("langsmith.Client", return_value=mock_client):
+                    from langsmith_cli.config import get_project_uuid, set_config_value, get_config_value, _project_uuid_cache
+
+                    # Clear cache
+                    _project_uuid_cache.clear()
+
+                    # Set legacy config (only UUID, no name)
+                    set_config_value("project-uuid", "old-uuid")
+
+                    # Should detect missing project_name and fetch new UUID
+                    result = get_project_uuid()
+                    assert result == "fetched-uuid"
+
+                    # Verify config was updated with both fields
+                    assert get_config_value("project-name") == "test-project"
+                    assert get_config_value("project-uuid") == "fetched-uuid"
+
+    def test_no_env_var_uses_config_default(self, temp_config_dir, monkeypatch):
+        """Test that no env var uses config as default."""
+        monkeypatch.delenv("LANGSMITH_PROJECT", raising=False)
+        monkeypatch.delenv("LANGSMITH_PROJECT_UUID", raising=False)
+
+        with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
+            with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
+                from langsmith_cli.config import get_project_uuid, set_config_value
+
+                # Set config
+                set_config_value("project-name", "default-project")
+                set_config_value("project-uuid", "default-uuid")
+
+                # Should use config UUID without env var
+                result = get_project_uuid()
+                assert result == "default-uuid"
+
+    def test_explicit_uuid_override(self, temp_config_dir, monkeypatch):
+        """Test that LANGSMITH_PROJECT_UUID overrides everything."""
+        monkeypatch.setenv("LANGSMITH_PROJECT", "test-project")
+        monkeypatch.setenv("LANGSMITH_PROJECT_UUID", "override-uuid")
+
+        with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
+            with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
+                from langsmith_cli.config import get_project_uuid, set_config_value
+
+                # Set config
+                set_config_value("project-name", "config-project")
+                set_config_value("project-uuid", "config-uuid")
+
+                # LANGSMITH_PROJECT_UUID should override everything
+                result = get_project_uuid()
+                assert result == "override-uuid"
+
+    def test_api_failure_handling(self, temp_config_dir, monkeypatch):
+        """Test that API failure is handled gracefully."""
+        from unittest.mock import MagicMock
+
+        monkeypatch.setenv("LANGSMITH_PROJECT", "nonexistent")
+        monkeypatch.setenv("LANGSMITH_API_KEY", TEST_API_KEY)
+
+        mock_client = MagicMock()
+        mock_client.read_project.side_effect = Exception("Project not found")
+
+        with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
+            with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
+                with patch("langsmith.Client", return_value=mock_client):
+                    from langsmith_cli.config import get_project_uuid, get_config_value, set_config_value, _project_uuid_cache
+
+                    # Clear cache
+                    _project_uuid_cache.clear()
+
+                    # Set old config
+                    set_config_value("project-name", "old-project")
+                    set_config_value("project-uuid", "old-uuid")
+
+                    # Should return None on API failure
+                    result = get_project_uuid()
+                    assert result is None
+
+                    # Verify config was NOT updated (preserves last known good state)
+                    assert get_config_value("project-name") == "old-project"
+                    assert get_config_value("project-uuid") == "old-uuid"
+
+    def test_cache_clears_on_manual_update(self, temp_config_dir):
+        """Test that in-memory cache clears when project_uuid is manually set."""
+        with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
+            with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
+                from langsmith_cli.config import set_config_value, _project_uuid_cache
+
+                # Populate cache
+                _project_uuid_cache["test-project"] = "cached-uuid"
+
+                # Manually set project_uuid
+                set_config_value("project-uuid", "new-uuid")
+
+                # Cache should be cleared
+                assert len(_project_uuid_cache) == 0
+
+    def test_in_memory_cache_updates_config(self, temp_config_dir, monkeypatch):
+        """Test that in-memory cache updates config when out of sync."""
+        monkeypatch.setenv("LANGSMITH_PROJECT", "cached-project")
+
+        with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
+            with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
+                from langsmith_cli.config import get_project_uuid, set_config_value, get_config_value, _project_uuid_cache
+
+                # Set old config
+                set_config_value("project-name", "old-project")
+                set_config_value("project-uuid", "old-uuid")
+
+                # Populate in-memory cache with different project
+                _project_uuid_cache["cached-project"] = "cached-uuid"
+
+                # Should use cache and update config
+                result = get_project_uuid()
+                assert result == "cached-uuid"
+
+                # Verify config was updated
+                assert get_config_value("project-name") == "cached-project"
+                assert get_config_value("project-uuid") == "cached-uuid"
+
+    def test_empty_project_name_handling(self, temp_config_dir, monkeypatch):
+        """Test graceful handling of empty project name."""
+        monkeypatch.setenv("LANGSMITH_PROJECT", "")
+
+        with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
+            with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
+                from langsmith_cli.config import get_project_uuid, set_config_value
+
+                # Set config
+                set_config_value("project-uuid", "config-uuid")
+
+                # Empty string should be treated as no env var
+                result = get_project_uuid()
+                assert result == "config-uuid"
+
+    def test_project_uuid_persists_after_lookup(self, temp_config_dir, monkeypatch):
+        """Test that both project_name and project_uuid persist after lookup."""
+        from unittest.mock import Mock, MagicMock
+
+        monkeypatch.setenv("LANGSMITH_PROJECT", "persist-project")
+        monkeypatch.setenv("LANGSMITH_API_KEY", TEST_API_KEY)
+
+        mock_project = Mock()
+        mock_project.id = "persist-uuid"
+        mock_project.name = "persist-project"
+
+        mock_client = MagicMock()
+        mock_client.read_project.return_value = mock_project
+
+        with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
+            with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
+                with patch("langsmith.Client", return_value=mock_client):
+                    from langsmith_cli.config import get_project_uuid, get_config_value, _project_uuid_cache
+
+                    # Clear cache
+                    _project_uuid_cache.clear()
+
+                    # First call should fetch and persist
+                    result = get_project_uuid()
+                    assert result == "persist-uuid"
+
+                    # Verify both fields were persisted
+                    assert get_config_value("project-name") == "persist-project"
+                    assert get_config_value("project-uuid") == "persist-uuid"
