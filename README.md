@@ -15,6 +15,8 @@ Set your LangSmith API key and project name:
 ```bash
 export LANGSMITH_API_KEY=lsv2_...
 export LANGSMITH_PROJECT=your-project-name
+# Optional: define your endpoint - defaults to 'us'
+export LANGSMITH_ENDPOINT=https://us.api.smith.langchain.com
 ```
 
 That's it! The CLI will automatically fetch traces or threads in `LANGSMITH_PROJECT`.
