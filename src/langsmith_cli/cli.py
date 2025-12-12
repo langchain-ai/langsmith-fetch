@@ -208,7 +208,19 @@ def thread(thread_id, project_uuid, format_type, output_file):
     metavar="PATH",
     help="Save output to file instead of printing to stdout",
 )
-def trace(trace_id, format_type, output_file):
+@click.option(
+    "--include-metadata",
+    is_flag=True,
+    default=False,
+    help="Include run metadata (status, timing, tokens, costs) in output",
+)
+@click.option(
+    "--include-feedback",
+    is_flag=True,
+    default=False,
+    help="Include feedback data in output (requires extra API call)",
+)
+def trace(trace_id, format_type, output_file, include_metadata, include_feedback):
     """Fetch messages for a single trace by trace ID.
 
     A trace represents a single execution path containing multiple runs (LLM calls,
@@ -220,18 +232,22 @@ def trace(trace_id, format_type, output_file):
 
     \b
     RETURNS:
-      List of messages with role, content, tool calls, and metadata.
+      List of messages with role, content, tool calls (default).
+      With --include-metadata: Dictionary with messages, metadata, and feedback.
 
     \b
     EXAMPLES:
-      # Fetch trace with default format (pretty)
+      # Fetch trace messages only (default)
       langsmith-fetch trace 3b0b15fe-1e3a-4aef-afa8-48df15879cfe
+
+      # Fetch trace with metadata (status, timing, tokens, costs)
+      langsmith-fetch trace 3b0b15fe-1e3a-4aef-afa8-48df15879cfe --include-metadata
+
+      # Fetch trace with both metadata and feedback
+      langsmith-fetch trace 3b0b15fe-1e3a-4aef-afa8-48df15879cfe --include-metadata --include-feedback
 
       # Fetch trace as JSON for parsing
       langsmith-fetch trace 3b0b15fe-1e3a-4aef-afa8-48df15879cfe --format json
-
-      # Fetch trace as raw JSON for piping
-      langsmith-fetch trace 3b0b15fe-1e3a-4aef-afa8-48df15879cfe --format raw
 
     \b
     PREREQUISITES:
@@ -253,13 +269,22 @@ def trace(trace_id, format_type, output_file):
         format_type = config.get_default_format()
 
     try:
-        # Fetch trace with metadata and feedback
-        trace_data = fetchers.fetch_trace_with_metadata(
-            trace_id, base_url=base_url, api_key=api_key
-        )
-
-        # Output with metadata and feedback
-        formatters.print_formatted_trace(trace_data, format_type, output_file)
+        # Fetch trace with or without metadata/feedback
+        if include_metadata or include_feedback:
+            # Fetch with metadata and/or feedback
+            trace_data = fetchers.fetch_trace_with_metadata(
+                trace_id,
+                base_url=base_url,
+                api_key=api_key,
+                include_feedback=include_feedback,
+            )
+            # Output with metadata and feedback
+            formatters.print_formatted_trace(trace_data, format_type, output_file)
+        else:
+            # Fetch messages only (no metadata/feedback)
+            messages = fetchers.fetch_trace(trace_id, base_url=base_url, api_key=api_key)
+            # Output just messages
+            formatters.print_formatted(messages, format_type, output_file)
 
     except Exception as e:
         click.echo(f"Error fetching trace: {e}", err=True)
@@ -401,6 +426,23 @@ def threads(
 
     # DIRECTORY MODE: output_dir provided
     if output_dir:
+        # Check if user mistakenly passed a thread ID (UUID) instead of directory
+        uuid_pattern = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        if re.match(uuid_pattern, output_dir, re.IGNORECASE):
+            click.echo(
+                f"Error: '{output_dir}' looks like a UUID, not a directory path.",
+                err=True,
+            )
+            click.echo(
+                "To fetch a specific thread by ID, use: langsmith-fetch thread <thread-id>",
+                err=True,
+            )
+            click.echo(
+                "To fetch multiple threads to a directory, use: langsmith-fetch threads <directory-path>",
+                err=True,
+            )
+            sys.exit(1)
+
         # Validate incompatible options
         if format_type:
             click.echo(
@@ -673,6 +715,23 @@ def traces(
 
     # DIRECTORY MODE: output_dir provided
     if output_dir:
+        # Check if user mistakenly passed a trace ID instead of directory
+        uuid_pattern = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        if re.match(uuid_pattern, output_dir, re.IGNORECASE):
+            click.echo(
+                f"Error: '{output_dir}' looks like a trace ID, not a directory path.",
+                err=True,
+            )
+            click.echo(
+                "To fetch a specific trace by ID, use: langsmith-fetch trace <trace-id>",
+                err=True,
+            )
+            click.echo(
+                "To fetch multiple traces to a directory, use: langsmith-fetch traces <directory-path>",
+                err=True,
+            )
+            sys.exit(1)
+
         # Validate incompatible options
         if format_type:
             click.echo(

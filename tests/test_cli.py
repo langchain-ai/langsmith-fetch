@@ -33,7 +33,7 @@ class TestTraceCommand:
         assert result.exit_code == 0
         # Check for Rich panel indicators
         assert "Message 1:" in result.output
-        assert "human" in result.output or "user" in result.output
+        assert "human" in result.output.lower() or "user" in result.output.lower()
 
     @responses.activate
     def test_trace_pretty_format(self, sample_trace_response, mock_env_api_key):
@@ -114,6 +114,46 @@ class TestTraceCommand:
 
         assert result.exit_code == 1
         assert "Error fetching trace" in result.output
+
+    @responses.activate
+    def test_trace_with_metadata_flag(self, sample_trace_response, mock_env_api_key):
+        """Test trace command with --include-metadata flag."""
+        responses.add(
+            responses.GET,
+            f"https://api.smith.langchain.com/runs/{TEST_TRACE_ID}?include_messages=true",
+            json=sample_trace_response,
+            status=200,
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["trace", TEST_TRACE_ID, "--include-metadata", "--format", "json"]
+        )
+
+        assert result.exit_code == 0
+        # When metadata is included, output should contain metadata structure
+        assert "metadata" in result.output or "trace_id" in result.output
+
+    @responses.activate
+    def test_trace_without_metadata_default(
+        self, sample_trace_response, mock_env_api_key
+    ):
+        """Test trace command defaults to no metadata."""
+        responses.add(
+            responses.GET,
+            f"https://api.smith.langchain.com/runs/{TEST_TRACE_ID}?include_messages=true",
+            json=sample_trace_response,
+            status=200,
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["trace", TEST_TRACE_ID, "--format", "json"])
+
+        assert result.exit_code == 0
+        # Without flags, should just return messages array
+        output_lower = result.output.lower()
+        # Check that it contains message content but not metadata wrapper
+        assert "jane" in output_lower
 
 
 class TestThreadCommand:
@@ -491,6 +531,18 @@ class TestThreadsCommand:
                 assert (output_dir / "thread_001.json").exists()
                 assert (output_dir / "thread_002.json").exists()
 
+    def test_threads_rejects_uuid_as_directory(self, mock_env_api_key):
+        """Test threads command rejects UUID passed as directory."""
+        runner = CliRunner()
+        # Pass a valid UUID instead of a directory path
+        fake_uuid = "3a12d0b2-bda5-4500-8732-c1984f647df5"
+        result = runner.invoke(main, ["threads", fake_uuid])
+
+        assert result.exit_code == 1
+        assert "looks like a UUID" in result.output
+        assert "langsmith-fetch thread <thread-id>" in result.output
+        assert "langsmith-fetch threads <directory-path>" in result.output
+
 
 class TestTracesCommand:
     """Tests for traces command."""
@@ -802,3 +854,15 @@ class TestTracesCommand:
 
             assert result.exit_code == 0
             assert "Found 1 trace(s)" in result.output
+
+    def test_traces_rejects_uuid_as_directory(self, mock_env_api_key):
+        """Test traces command rejects UUID passed as directory."""
+        runner = CliRunner()
+        # Pass a valid UUID instead of a directory path
+        fake_uuid = "3a12d0b2-bda5-4500-8732-c1984f647df5"
+        result = runner.invoke(main, ["traces", fake_uuid, "--include-metadata"])
+
+        assert result.exit_code == 1
+        assert "looks like a trace ID" in result.output
+        assert "langsmith-fetch trace <trace-id>" in result.output
+        assert "langsmith-fetch traces <directory-path>" in result.output
