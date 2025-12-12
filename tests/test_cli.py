@@ -536,7 +536,9 @@ class TestThreadsCommand:
         runner = CliRunner()
         # Pass a valid UUID instead of a directory path
         fake_uuid = "3a12d0b2-bda5-4500-8732-c1984f647df5"
-        result = runner.invoke(main, ["threads", fake_uuid])
+        result = runner.invoke(
+            main, ["threads", fake_uuid, "--project-uuid", TEST_PROJECT_UUID]
+        )
 
         assert result.exit_code == 1
         assert "looks like a UUID" in result.output
