@@ -586,10 +586,52 @@ def fetch_recent_traces(
         start_time = datetime.fromisoformat(since_clean)
         filter_params["start_time"] = start_time
 
-    # Fetch runs
+    # Fetch runs with validation for stale project UUID
     list_start = perf_counter()
-    runs = list(client.list_runs(**filter_params))
-    list_duration = perf_counter() - list_start
+    try:
+        runs = list(client.list_runs(**filter_params))
+        list_duration = perf_counter() - list_start
+    except Exception as e:
+        # Check if this is a 404 error related to stale project UUID
+        is_stale_uuid = False
+        if hasattr(e, 'response') and hasattr(e.response, 'status_code'):
+            if e.response.status_code == 404 and "session" in str(e).lower():
+                is_stale_uuid = True
+        elif "404" in str(e) and "session" in str(e).lower():
+            is_stale_uuid = True
+
+        if is_stale_uuid and project_uuid:
+            # Import config module
+            import os
+            from . import config
+
+            # Get project name for refresh
+            project_name = os.environ.get("LANGSMITH_PROJECT") or config.get_config_value("project-name")
+
+            if project_name:
+                # Validate and refresh UUID
+                new_uuid = config.validate_and_refresh_uuid(
+                    project_uuid,
+                    project_name,
+                    api_key,
+                    base_url
+                )
+
+                if new_uuid and new_uuid != project_uuid:
+                    # Retry with new UUID
+                    print(f"Retrying operation with refreshed UUID...", file=sys.stderr)
+                    filter_params["project_id"] = new_uuid
+                    runs = list(client.list_runs(**filter_params))
+                    list_duration = perf_counter() - list_start
+                else:
+                    # UUID refresh failed, re-raise original error
+                    raise
+            else:
+                # No project name available, re-raise original error
+                raise
+        else:
+            # Not a stale UUID error, re-raise
+            raise
 
     if not runs:
         raise ValueError("No traces found matching criteria")
