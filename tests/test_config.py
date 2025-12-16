@@ -521,3 +521,192 @@ class TestProjectLookup:
                     # Verify both fields were persisted
                     assert get_config_value("project-name") == "persist-project"
                     assert get_config_value("project-uuid") == "persist-uuid"
+
+
+class TestValidateAndRefreshUUID:
+    """Tests for validate_and_refresh_uuid function."""
+
+    def test_validate_and_refresh_uuid_valid(self, temp_config_dir, monkeypatch):
+        """Test that valid UUID is returned without refresh."""
+        from unittest.mock import Mock, MagicMock
+
+        # Mock LangSmith Client - project exists with this UUID
+        mock_project = Mock()
+        mock_project.id = "valid-uuid-123"
+        mock_project.name = "test-project"
+
+        mock_client = MagicMock()
+        mock_client.read_project.return_value = mock_project
+
+        with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
+            with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
+                with patch("langsmith.Client", return_value=mock_client):
+                    from langsmith_cli.config import validate_and_refresh_uuid
+
+                    result = validate_and_refresh_uuid(
+                        project_uuid="valid-uuid-123",
+                        project_name="test-project",
+                        api_key=TEST_API_KEY,
+                        base_url="https://api.smith.langchain.com"
+                    )
+
+                    assert result == "valid-uuid-123"
+                    # Should have called read_project by ID
+                    mock_client.read_project.assert_called_once_with(project_id="valid-uuid-123")
+
+    def test_validate_and_refresh_uuid_stale_success(self, temp_config_dir, monkeypatch):
+        """Test that stale UUID is detected and refreshed successfully."""
+        from unittest.mock import Mock, MagicMock
+
+        # Mock Client responses:
+        # 1. First call (read_project by UUID) returns 404
+        # 2. Second call (read_project by name) returns new UUID
+        mock_project = Mock()
+        mock_project.id = "new-uuid-456"
+        mock_project.name = "test-project"
+
+        mock_404_response = Mock()
+        mock_404_response.status_code = 404
+
+        mock_client = MagicMock()
+        # First call raises 404
+        mock_404_error = Exception("404: Project not found")
+        mock_404_error.response = mock_404_response
+        mock_client.read_project.side_effect = [
+            mock_404_error,  # UUID validation fails
+            mock_project     # Name-based lookup succeeds
+        ]
+
+        with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
+            with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
+                with patch("langsmith.Client", return_value=mock_client):
+                    from langsmith_cli.config import validate_and_refresh_uuid, get_config_value, _project_uuid_cache
+
+                    # Clear cache
+                    _project_uuid_cache.clear()
+
+                    result = validate_and_refresh_uuid(
+                        project_uuid="old-uuid-123",
+                        project_name="test-project",
+                        api_key=TEST_API_KEY,
+                        base_url="https://api.smith.langchain.com"
+                    )
+
+                    assert result == "new-uuid-456"
+                    # Config should be updated
+                    assert get_config_value("project-uuid") == "new-uuid-456"
+                    assert get_config_value("project-name") == "test-project"
+                    # Cache should be cleared
+                    assert len(_project_uuid_cache) == 0
+
+    def test_validate_and_refresh_uuid_stale_no_name(self, temp_config_dir, monkeypatch):
+        """Test that validation returns None when UUID is stale but no project name provided."""
+        from unittest.mock import Mock, MagicMock
+
+        mock_404_response = Mock()
+        mock_404_response.status_code = 404
+
+        mock_client = MagicMock()
+        mock_404_error = Exception("404: Project not found")
+        mock_404_error.response = mock_404_response
+        mock_client.read_project.side_effect = mock_404_error
+
+        with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
+            with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
+                with patch("langsmith.Client", return_value=mock_client):
+                    from langsmith_cli.config import validate_and_refresh_uuid
+
+                    result = validate_and_refresh_uuid(
+                        project_uuid="old-uuid-123",
+                        project_name=None,  # No project name
+                        api_key=TEST_API_KEY,
+                        base_url="https://api.smith.langchain.com"
+                    )
+
+                    assert result is None
+
+    def test_validate_and_refresh_uuid_network_error(self, temp_config_dir, monkeypatch):
+        """Test that network errors preserve the original UUID."""
+        from unittest.mock import MagicMock
+
+        mock_client = MagicMock()
+        # Simulate network error (500)
+        mock_client.read_project.side_effect = Exception("500: Internal Server Error")
+
+        with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
+            with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
+                with patch("langsmith.Client", return_value=mock_client):
+                    from langsmith_cli.config import validate_and_refresh_uuid
+
+                    result = validate_and_refresh_uuid(
+                        project_uuid="original-uuid-123",
+                        project_name="test-project",
+                        api_key=TEST_API_KEY,
+                        base_url="https://api.smith.langchain.com"
+                    )
+
+                    # Should return original UUID on network error
+                    assert result == "original-uuid-123"
+
+    def test_validate_and_refresh_uuid_refresh_fails(self, temp_config_dir, monkeypatch):
+        """Test that validation returns None when refresh lookup also fails."""
+        from unittest.mock import Mock, MagicMock
+
+        mock_404_response = Mock()
+        mock_404_response.status_code = 404
+
+        mock_client = MagicMock()
+        mock_404_error = Exception("404: Project not found")
+        mock_404_error.response = mock_404_response
+        # Both UUID validation and name lookup fail
+        mock_client.read_project.side_effect = mock_404_error
+
+        with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
+            with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
+                with patch("langsmith.Client", return_value=mock_client):
+                    from langsmith_cli.config import validate_and_refresh_uuid
+
+                    result = validate_and_refresh_uuid(
+                        project_uuid="old-uuid-123",
+                        project_name="nonexistent-project",
+                        api_key=TEST_API_KEY,
+                        base_url="https://api.smith.langchain.com"
+                    )
+
+                    assert result is None
+
+    def test_validate_and_refresh_uuid_403_permission(self, temp_config_dir, monkeypatch):
+        """Test that 403 permission errors trigger refresh attempt."""
+        from unittest.mock import Mock, MagicMock
+
+        mock_project = Mock()
+        mock_project.id = "new-uuid-789"
+        mock_project.name = "test-project"
+
+        mock_403_response = Mock()
+        mock_403_response.status_code = 403
+
+        mock_client = MagicMock()
+        mock_403_error = Exception("403: Forbidden")
+        mock_403_error.response = mock_403_response
+        # First call raises 403, second succeeds
+        mock_client.read_project.side_effect = [
+            mock_403_error,  # UUID validation fails with 403
+            mock_project     # Name-based lookup succeeds
+        ]
+
+        with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
+            with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
+                with patch("langsmith.Client", return_value=mock_client):
+                    from langsmith_cli.config import validate_and_refresh_uuid, get_config_value
+
+                    result = validate_and_refresh_uuid(
+                        project_uuid="old-uuid-123",
+                        project_name="test-project",
+                        api_key=TEST_API_KEY,
+                        base_url="https://api.smith.langchain.com"
+                    )
+
+                    assert result == "new-uuid-789"
+                    # Config should be updated
+                    assert get_config_value("project-uuid") == "new-uuid-789"

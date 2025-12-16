@@ -42,8 +42,43 @@ def fetch_thread(
     url = f"{base_url}/runs/threads/{thread_id}"
     params = {"select": "all_messages", "session_id": project_uuid}
 
-    response = requests.get(url, headers=headers, params=params)
-    response.raise_for_status()
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
+    except requests.HTTPError as e:
+        # Check if this is a 404 error that might be due to stale UUID
+        if e.response.status_code == 404:
+            # Import config module
+            import os
+            from . import config
+
+            # Get project name for refresh
+            project_name = os.environ.get("LANGSMITH_PROJECT") or config.get_config_value("project-name")
+
+            if project_name:
+                # Validate and refresh UUID
+                new_uuid = config.validate_and_refresh_uuid(
+                    project_uuid,
+                    project_name,
+                    api_key,
+                    base_url
+                )
+
+                if new_uuid and new_uuid != project_uuid:
+                    # Retry with new UUID
+                    print(f"Retrying operation with refreshed UUID...", file=sys.stderr)
+                    params["session_id"] = new_uuid
+                    response = requests.get(url, headers=headers, params=params)
+                    response.raise_for_status()
+                else:
+                    # UUID refresh failed or returned same UUID, re-raise original error
+                    raise
+            else:
+                # No project name available, re-raise original error
+                raise
+        else:
+            # Not a 404 error, re-raise
+            raise
 
     data = response.json()
     messages_text = data["previews"]["all_messages"]
@@ -136,16 +171,51 @@ def fetch_recent_threads(
         start_time = datetime.fromisoformat(since_clean)
         body["start_time"] = start_time.isoformat()
 
-    response = requests.post(url, headers=headers, data=json.dumps(body))
-
-    # Add better error handling
     try:
+        response = requests.post(url, headers=headers, data=json.dumps(body))
         response.raise_for_status()
-    except requests.HTTPError:
-        # Print response content for debugging
-        print(f"API Error Response ({response.status_code}): {response.text}")
-        print(f"Request body was: {json.dumps(body, indent=2)}")
-        raise
+    except requests.HTTPError as e:
+        # Check if this is a 404 error that might be due to stale UUID
+        if e.response.status_code == 404:
+            # Import config module
+            import os
+            from . import config
+
+            # Get project name for refresh
+            project_name = os.environ.get("LANGSMITH_PROJECT") or config.get_config_value("project-name")
+
+            if project_name:
+                # Validate and refresh UUID
+                new_uuid = config.validate_and_refresh_uuid(
+                    project_uuid,
+                    project_name,
+                    api_key,
+                    base_url
+                )
+
+                if new_uuid and new_uuid != project_uuid:
+                    # Retry with new UUID
+                    print(f"Retrying operation with refreshed UUID...", file=sys.stderr)
+                    body["session"] = [new_uuid]
+                    response = requests.post(url, headers=headers, data=json.dumps(body))
+                    response.raise_for_status()
+                    # Update project_uuid for subsequent fetch_thread calls
+                    project_uuid = new_uuid
+                else:
+                    # UUID refresh failed, print debug info and re-raise
+                    print(f"API Error Response ({response.status_code}): {response.text}", file=sys.stderr)
+                    print(f"Request body was: {json.dumps(body, indent=2)}", file=sys.stderr)
+                    raise
+            else:
+                # No project name available, print debug info and re-raise
+                print(f"API Error Response ({response.status_code}): {response.text}", file=sys.stderr)
+                print(f"Request body was: {json.dumps(body, indent=2)}", file=sys.stderr)
+                raise
+        else:
+            # Not a 404 error, print debug info and re-raise
+            print(f"API Error Response ({response.status_code}): {response.text}", file=sys.stderr)
+            print(f"Request body was: {json.dumps(body, indent=2)}", file=sys.stderr)
+            raise
 
     data = response.json()
 
