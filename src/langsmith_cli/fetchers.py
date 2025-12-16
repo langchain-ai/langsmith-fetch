@@ -19,6 +19,64 @@ except ImportError:
     HAS_LANGSMITH = False
 
 
+def check_and_refresh_stale_uuid(
+    error: Exception,
+    project_uuid: str | None,
+    api_key: str,
+    base_url: str
+) -> tuple[bool, str | None]:
+    """
+    Check if error is due to stale UUID and attempt refresh.
+
+    This helper function detects 404 errors related to stale project UUIDs
+    (e.g., when a project is deleted and recreated with the same name),
+    attempts to refresh the UUID, and indicates whether the caller should retry.
+
+    Args:
+        error: The exception that was caught
+        project_uuid: Current project UUID that may be stale
+        api_key: LangSmith API key
+        base_url: LangSmith base URL
+
+    Returns:
+        Tuple of (should_retry, new_uuid_or_none)
+        - should_retry: True if UUID was refreshed and caller should retry
+        - new_uuid_or_none: The new UUID if refreshed, None otherwise
+    """
+    # Check if this is a stale UUID error (404 with session/project not found)
+    is_stale = False
+    if hasattr(error, 'response') and hasattr(error.response, 'status_code'):
+        if error.response.status_code == 404:
+            error_text = str(error).lower()
+            if "session" in error_text or "project" in error_text:
+                is_stale = True
+    elif "404" in str(error):
+        error_text = str(error).lower()
+        if "session" in error_text or "project" in error_text:
+            is_stale = True
+
+    if not is_stale or not project_uuid:
+        return False, None
+
+    # Get project name for refresh
+    import os
+    from . import config
+
+    project_name = os.environ.get("LANGSMITH_PROJECT") or config.get_config_value("project-name")
+
+    if not project_name:
+        return False, None
+
+    # Attempt refresh
+    new_uuid = config.validate_and_refresh_uuid(project_uuid, project_name, api_key, base_url)
+
+    if new_uuid and new_uuid != project_uuid:
+        print(f"Retrying operation with refreshed UUID...", file=sys.stderr)
+        return True, new_uuid
+
+    return False, None
+
+
 def fetch_thread(
     thread_id: str, project_uuid: str, *, base_url: str, api_key: str
 ) -> list[dict[str, Any]]:
@@ -46,38 +104,12 @@ def fetch_thread(
         response = requests.get(url, headers=headers, params=params)
         response.raise_for_status()
     except requests.HTTPError as e:
-        # Check if this is a 404 error that might be due to stale UUID
-        if e.response.status_code == 404:
-            # Import config module
-            import os
-            from . import config
-
-            # Get project name for refresh
-            project_name = os.environ.get("LANGSMITH_PROJECT") or config.get_config_value("project-name")
-
-            if project_name:
-                # Validate and refresh UUID
-                new_uuid = config.validate_and_refresh_uuid(
-                    project_uuid,
-                    project_name,
-                    api_key,
-                    base_url
-                )
-
-                if new_uuid and new_uuid != project_uuid:
-                    # Retry with new UUID
-                    print(f"Retrying operation with refreshed UUID...", file=sys.stderr)
-                    params["session_id"] = new_uuid
-                    response = requests.get(url, headers=headers, params=params)
-                    response.raise_for_status()
-                else:
-                    # UUID refresh failed or returned same UUID, re-raise original error
-                    raise
-            else:
-                # No project name available, re-raise original error
-                raise
+        should_retry, new_uuid = check_and_refresh_stale_uuid(e, project_uuid, api_key, base_url)
+        if should_retry:
+            params["session_id"] = new_uuid
+            response = requests.get(url, headers=headers, params=params)
+            response.raise_for_status()
         else:
-            # Not a 404 error, re-raise
             raise
 
     data = response.json()
@@ -175,45 +207,16 @@ def fetch_recent_threads(
         response = requests.post(url, headers=headers, data=json.dumps(body))
         response.raise_for_status()
     except requests.HTTPError as e:
-        # Check if this is a 404 error that might be due to stale UUID
-        if e.response.status_code == 404:
-            # Import config module
-            import os
-            from . import config
-
-            # Get project name for refresh
-            project_name = os.environ.get("LANGSMITH_PROJECT") or config.get_config_value("project-name")
-
-            if project_name:
-                # Validate and refresh UUID
-                new_uuid = config.validate_and_refresh_uuid(
-                    project_uuid,
-                    project_name,
-                    api_key,
-                    base_url
-                )
-
-                if new_uuid and new_uuid != project_uuid:
-                    # Retry with new UUID
-                    print(f"Retrying operation with refreshed UUID...", file=sys.stderr)
-                    body["session"] = [new_uuid]
-                    response = requests.post(url, headers=headers, data=json.dumps(body))
-                    response.raise_for_status()
-                    # Update project_uuid for subsequent fetch_thread calls
-                    project_uuid = new_uuid
-                else:
-                    # UUID refresh failed, print debug info and re-raise
-                    print(f"API Error Response ({response.status_code}): {response.text}", file=sys.stderr)
-                    print(f"Request body was: {json.dumps(body, indent=2)}", file=sys.stderr)
-                    raise
-            else:
-                # No project name available, print debug info and re-raise
-                print(f"API Error Response ({response.status_code}): {response.text}", file=sys.stderr)
-                print(f"Request body was: {json.dumps(body, indent=2)}", file=sys.stderr)
-                raise
+        should_retry, new_uuid = check_and_refresh_stale_uuid(e, project_uuid, api_key, base_url)
+        if should_retry:
+            body["session"] = [new_uuid]
+            response = requests.post(url, headers=headers, data=json.dumps(body))
+            response.raise_for_status()
+            # Update project_uuid for subsequent fetch_thread calls
+            project_uuid = new_uuid
         else:
-            # Not a 404 error, print debug info and re-raise
-            print(f"API Error Response ({response.status_code}): {response.text}", file=sys.stderr)
+            # Not a stale UUID error, print debug info and re-raise
+            print(f"API Error Response ({e.response.status_code}): {e.response.text}", file=sys.stderr)
             print(f"Request body was: {json.dumps(body, indent=2)}", file=sys.stderr)
             raise
 
@@ -592,45 +595,12 @@ def fetch_recent_traces(
         runs = list(client.list_runs(**filter_params))
         list_duration = perf_counter() - list_start
     except Exception as e:
-        # Check if this is a 404 error related to stale project UUID
-        is_stale_uuid = False
-        if hasattr(e, 'response') and hasattr(e.response, 'status_code'):
-            if e.response.status_code == 404 and "session" in str(e).lower():
-                is_stale_uuid = True
-        elif "404" in str(e) and "session" in str(e).lower():
-            is_stale_uuid = True
-
-        if is_stale_uuid and project_uuid:
-            # Import config module
-            import os
-            from . import config
-
-            # Get project name for refresh
-            project_name = os.environ.get("LANGSMITH_PROJECT") or config.get_config_value("project-name")
-
-            if project_name:
-                # Validate and refresh UUID
-                new_uuid = config.validate_and_refresh_uuid(
-                    project_uuid,
-                    project_name,
-                    api_key,
-                    base_url
-                )
-
-                if new_uuid and new_uuid != project_uuid:
-                    # Retry with new UUID
-                    print(f"Retrying operation with refreshed UUID...", file=sys.stderr)
-                    filter_params["project_id"] = new_uuid
-                    runs = list(client.list_runs(**filter_params))
-                    list_duration = perf_counter() - list_start
-                else:
-                    # UUID refresh failed, re-raise original error
-                    raise
-            else:
-                # No project name available, re-raise original error
-                raise
+        should_retry, new_uuid = check_and_refresh_stale_uuid(e, project_uuid, api_key, base_url)
+        if should_retry:
+            filter_params["project_id"] = new_uuid
+            runs = list(client.list_runs(**filter_params))
+            list_duration = perf_counter() - list_start
         else:
-            # Not a stale UUID error, re-raise
             raise
 
     if not runs:
