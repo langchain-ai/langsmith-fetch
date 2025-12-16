@@ -19,6 +19,64 @@ except ImportError:
     HAS_LANGSMITH = False
 
 
+def check_and_refresh_stale_uuid(
+    error: Exception,
+    project_uuid: str | None,
+    api_key: str,
+    base_url: str
+) -> tuple[bool, str | None]:
+    """
+    Check if error is due to stale UUID and attempt refresh.
+
+    This helper function detects 404 errors related to stale project UUIDs
+    (e.g., when a project is deleted and recreated with the same name),
+    attempts to refresh the UUID, and indicates whether the caller should retry.
+
+    Args:
+        error: The exception that was caught
+        project_uuid: Current project UUID that may be stale
+        api_key: LangSmith API key
+        base_url: LangSmith base URL
+
+    Returns:
+        Tuple of (should_retry, new_uuid_or_none)
+        - should_retry: True if UUID was refreshed and caller should retry
+        - new_uuid_or_none: The new UUID if refreshed, None otherwise
+    """
+    # Check if this is a stale UUID error (404 with session/project not found)
+    is_stale = False
+    if hasattr(error, 'response') and hasattr(error.response, 'status_code'):
+        if error.response.status_code == 404:
+            error_text = str(error).lower()
+            if "session" in error_text or "project" in error_text:
+                is_stale = True
+    elif "404" in str(error):
+        error_text = str(error).lower()
+        if "session" in error_text or "project" in error_text:
+            is_stale = True
+
+    if not is_stale or not project_uuid:
+        return False, None
+
+    # Get project name for refresh
+    import os
+    from . import config
+
+    project_name = os.environ.get("LANGSMITH_PROJECT") or config.get_config_value("project-name")
+
+    if not project_name:
+        return False, None
+
+    # Attempt refresh
+    new_uuid = config.validate_and_refresh_uuid(project_uuid, project_name, api_key, base_url)
+
+    if new_uuid and new_uuid != project_uuid:
+        print(f"Retrying operation with refreshed UUID...", file=sys.stderr)
+        return True, new_uuid
+
+    return False, None
+
+
 def fetch_thread(
     thread_id: str, project_uuid: str, *, base_url: str, api_key: str
 ) -> list[dict[str, Any]]:
@@ -42,8 +100,17 @@ def fetch_thread(
     url = f"{base_url}/runs/threads/{thread_id}"
     params = {"select": "all_messages", "session_id": project_uuid}
 
-    response = requests.get(url, headers=headers, params=params)
-    response.raise_for_status()
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
+    except requests.HTTPError as e:
+        should_retry, new_uuid = check_and_refresh_stale_uuid(e, project_uuid, api_key, base_url)
+        if should_retry:
+            params["session_id"] = new_uuid
+            response = requests.get(url, headers=headers, params=params)
+            response.raise_for_status()
+        else:
+            raise
 
     data = response.json()
     messages_text = data["previews"]["all_messages"]
@@ -136,16 +203,22 @@ def fetch_recent_threads(
         start_time = datetime.fromisoformat(since_clean)
         body["start_time"] = start_time.isoformat()
 
-    response = requests.post(url, headers=headers, data=json.dumps(body))
-
-    # Add better error handling
     try:
+        response = requests.post(url, headers=headers, data=json.dumps(body))
         response.raise_for_status()
-    except requests.HTTPError:
-        # Print response content for debugging
-        print(f"API Error Response ({response.status_code}): {response.text}")
-        print(f"Request body was: {json.dumps(body, indent=2)}")
-        raise
+    except requests.HTTPError as e:
+        should_retry, new_uuid = check_and_refresh_stale_uuid(e, project_uuid, api_key, base_url)
+        if should_retry:
+            body["session"] = [new_uuid]
+            response = requests.post(url, headers=headers, data=json.dumps(body))
+            response.raise_for_status()
+            # Update project_uuid for subsequent fetch_thread calls
+            project_uuid = new_uuid
+        else:
+            # Not a stale UUID error, print debug info and re-raise
+            print(f"API Error Response ({e.response.status_code}): {e.response.text}", file=sys.stderr)
+            print(f"Request body was: {json.dumps(body, indent=2)}", file=sys.stderr)
+            raise
 
     data = response.json()
 
@@ -516,10 +589,19 @@ def fetch_recent_traces(
         start_time = datetime.fromisoformat(since_clean)
         filter_params["start_time"] = start_time
 
-    # Fetch runs
+    # Fetch runs with validation for stale project UUID
     list_start = perf_counter()
-    runs = list(client.list_runs(**filter_params))
-    list_duration = perf_counter() - list_start
+    try:
+        runs = list(client.list_runs(**filter_params))
+        list_duration = perf_counter() - list_start
+    except Exception as e:
+        should_retry, new_uuid = check_and_refresh_stale_uuid(e, project_uuid, api_key, base_url)
+        if should_retry:
+            filter_params["project_id"] = new_uuid
+            runs = list(client.list_runs(**filter_params))
+            list_duration = perf_counter() - list_start
+        else:
+            raise
 
     if not runs:
         raise ValueError("No traces found matching criteria")
