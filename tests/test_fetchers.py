@@ -13,6 +13,9 @@ from tests.conftest import (
     TEST_API_KEY,
     TEST_BASE_URL,
     TEST_PROJECT_UUID,
+    TEST_TAG_1,
+    TEST_TAG_2,
+    TEST_TAG_3,
     TEST_THREAD_ID,
     TEST_TRACE_ID,
 )
@@ -793,3 +796,231 @@ class TestFetchRecentThreads:
         request_body = json.loads(responses.calls[0].request.body)
         assert "start_time" in request_body
         assert len(results) == 1
+
+
+class TestFetchTracesByTags:
+    """Tests for fetch_traces_by_tags function."""
+
+    @responses.activate
+    @patch("langsmith.Client")
+    def test_fetch_traces_single_tag(self, mock_client_class, sample_trace_response):
+        """Test fetching traces with a single tag."""
+        # Mock the Client
+        mock_client = Mock()
+        mock_run = Mock()
+        mock_run.id = TEST_TRACE_ID
+        mock_run.tags = [TEST_TAG_1]
+        mock_run.feedback_stats = {}
+        mock_run.start_time = None
+        mock_run.end_time = None
+        mock_run.extra = {}
+        mock_client.list_runs.return_value = [mock_run]
+        mock_client_class.return_value = mock_client
+
+        # Mock the REST API call
+        responses.add(
+            responses.GET,
+            f"https://api.smith.langchain.com/runs/{TEST_TRACE_ID}",
+            json=sample_trace_response,
+            status=200,
+        )
+
+        traces_data = fetchers.fetch_traces_by_tags(
+            api_key=TEST_API_KEY,
+            base_url=TEST_BASE_URL,
+            tags=[TEST_TAG_1],
+            include_metadata=False,
+            include_feedback=False,
+        )
+
+        # Verify list_runs was called with correct tag filter
+        call_kwargs = mock_client.list_runs.call_args[1]
+        assert f'has(tags, "{TEST_TAG_1}")' in call_kwargs["filter"]
+        assert "eq(is_root, true)" in call_kwargs["filter"]
+
+        assert isinstance(traces_data, list)
+        assert len(traces_data) == 1
+
+    @responses.activate
+    @patch("langsmith.Client")
+    def test_fetch_traces_multiple_tags_or_logic(
+        self, mock_client_class, sample_trace_response
+    ):
+        """Test fetching traces with multiple tags using OR logic (default)."""
+        mock_client = Mock()
+        mock_run1 = Mock()
+        mock_run1.id = "trace-1"
+        mock_run1.tags = [TEST_TAG_1]
+        mock_run1.feedback_stats = {}
+        mock_run1.start_time = None
+        mock_run1.end_time = None
+        mock_run1.extra = {}
+        mock_run2 = Mock()
+        mock_run2.id = "trace-2"
+        mock_run2.tags = [TEST_TAG_3]
+        mock_run2.feedback_stats = {}
+        mock_run2.start_time = None
+        mock_run2.end_time = None
+        mock_run2.extra = {}
+        mock_client.list_runs.return_value = [mock_run1, mock_run2]
+        mock_client_class.return_value = mock_client
+
+        responses.add(
+            responses.GET,
+            "https://api.smith.langchain.com/runs/trace-1",
+            json=sample_trace_response,
+            status=200,
+        )
+        responses.add(
+            responses.GET,
+            "https://api.smith.langchain.com/runs/trace-2",
+            json=sample_trace_response,
+            status=200,
+        )
+
+        traces_data = fetchers.fetch_traces_by_tags(
+            api_key=TEST_API_KEY,
+            base_url=TEST_BASE_URL,
+            tags=[TEST_TAG_1, TEST_TAG_3],
+            match_all_tags=False,  # OR logic (default)
+            include_metadata=False,
+            include_feedback=False,
+        )
+
+        # Verify OR logic in filter
+        call_kwargs = mock_client.list_runs.call_args[1]
+        filter_str = call_kwargs["filter"]
+        assert f'has(tags, "{TEST_TAG_1}")' in filter_str
+        assert f'has(tags, "{TEST_TAG_3}")' in filter_str
+        assert " or " in filter_str.lower()
+
+        assert len(traces_data) == 2
+
+    @responses.activate
+    @patch("langsmith.Client")
+    def test_fetch_traces_multiple_tags_and_logic(
+        self, mock_client_class, sample_trace_response
+    ):
+        """Test fetching traces with multiple tags using AND logic."""
+        mock_client = Mock()
+        mock_run = Mock()
+        mock_run.id = TEST_TRACE_ID
+        mock_run.tags = [TEST_TAG_1, TEST_TAG_2]
+        mock_run.feedback_stats = {}
+        mock_run.start_time = None
+        mock_run.end_time = None
+        mock_run.extra = {}
+        mock_client.list_runs.return_value = [mock_run]
+        mock_client_class.return_value = mock_client
+
+        responses.add(
+            responses.GET,
+            f"https://api.smith.langchain.com/runs/{TEST_TRACE_ID}",
+            json=sample_trace_response,
+            status=200,
+        )
+
+        traces_data = fetchers.fetch_traces_by_tags(
+            api_key=TEST_API_KEY,
+            base_url=TEST_BASE_URL,
+            tags=[TEST_TAG_1, TEST_TAG_2],
+            match_all_tags=True,  # AND logic
+            include_metadata=False,
+            include_feedback=False,
+        )
+
+        # Verify AND logic in filter
+        call_kwargs = mock_client.list_runs.call_args[1]
+        filter_str = call_kwargs["filter"]
+        assert f'has(tags, "{TEST_TAG_1}")' in filter_str
+        assert f'has(tags, "{TEST_TAG_2}")' in filter_str
+        # Both tag conditions should be combined with 'and'
+        # The filter should look like: and(eq(is_root, true), ..., has(tags, "production"), has(tags, "api-v2"))
+
+        assert len(traces_data) == 1
+
+    @patch("langsmith.Client")
+    def test_fetch_traces_by_tags_no_matches(self, mock_client_class):
+        """Test fetch_traces_by_tags when no traces match the tags."""
+        mock_client = Mock()
+        mock_client.list_runs.return_value = []
+        mock_client_class.return_value = mock_client
+
+        with pytest.raises(ValueError, match="No traces found matching criteria"):
+            fetchers.fetch_traces_by_tags(
+                api_key=TEST_API_KEY,
+                base_url=TEST_BASE_URL,
+                tags=["nonexistent-tag"],
+            )
+
+    @responses.activate
+    @patch("langsmith.Client")
+    def test_fetch_traces_by_tags_with_limit(
+        self, mock_client_class, sample_trace_response
+    ):
+        """Test that limit parameter is passed correctly."""
+        mock_client = Mock()
+        mock_run = Mock()
+        mock_run.id = TEST_TRACE_ID
+        mock_run.tags = [TEST_TAG_1]
+        mock_run.feedback_stats = {}
+        mock_run.start_time = None
+        mock_run.end_time = None
+        mock_run.extra = {}
+        mock_client.list_runs.return_value = [mock_run]
+        mock_client_class.return_value = mock_client
+
+        responses.add(
+            responses.GET,
+            f"https://api.smith.langchain.com/runs/{TEST_TRACE_ID}",
+            json=sample_trace_response,
+            status=200,
+        )
+
+        fetchers.fetch_traces_by_tags(
+            api_key=TEST_API_KEY,
+            base_url=TEST_BASE_URL,
+            tags=[TEST_TAG_1],
+            limit=5,
+            include_metadata=False,
+            include_feedback=False,
+        )
+
+        call_kwargs = mock_client.list_runs.call_args[1]
+        assert call_kwargs["limit"] == 5
+
+    @responses.activate
+    @patch("langsmith.Client")
+    def test_fetch_traces_by_tags_with_project_uuid(
+        self, mock_client_class, sample_trace_response
+    ):
+        """Test that project_uuid is passed correctly."""
+        mock_client = Mock()
+        mock_run = Mock()
+        mock_run.id = TEST_TRACE_ID
+        mock_run.tags = [TEST_TAG_1]
+        mock_run.feedback_stats = {}
+        mock_run.start_time = None
+        mock_run.end_time = None
+        mock_run.extra = {}
+        mock_client.list_runs.return_value = [mock_run]
+        mock_client_class.return_value = mock_client
+
+        responses.add(
+            responses.GET,
+            f"https://api.smith.langchain.com/runs/{TEST_TRACE_ID}",
+            json=sample_trace_response,
+            status=200,
+        )
+
+        fetchers.fetch_traces_by_tags(
+            api_key=TEST_API_KEY,
+            base_url=TEST_BASE_URL,
+            tags=[TEST_TAG_1],
+            project_uuid=TEST_PROJECT_UUID,
+            include_metadata=False,
+            include_feedback=False,
+        )
+
+        call_kwargs = mock_client.list_runs.call_args[1]
+        assert call_kwargs["project_id"] == TEST_PROJECT_UUID

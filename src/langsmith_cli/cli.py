@@ -629,6 +629,20 @@ def threads(
     default=False,
     help="Include feedback data in output (requires extra API call)",
 )
+@click.option(
+    "--tag",
+    "-t",
+    "tags",
+    multiple=True,
+    metavar="TAG",
+    help="Filter traces by tag. Can be specified multiple times for OR logic (any tag matches).",
+)
+@click.option(
+    "--all-tags",
+    is_flag=True,
+    default=False,
+    help="Require ALL tags to match (AND logic) instead of ANY tag (OR logic).",
+)
 def traces(
     output_dir,
     project_uuid,
@@ -642,6 +656,8 @@ def traces(
     max_concurrent,
     include_metadata,
     include_feedback,
+    tags,
+    all_tags,
 ):
     """Fetch recent traces from LangSmith BY CHRONOLOGICAL TIME.
 
@@ -677,6 +693,15 @@ def traces(
           langsmith-fetch traces --last-n-minutes 30
           langsmith-fetch traces --since 2025-12-09T10:00:00Z
           langsmith-fetch traces ./dir --limit 10 --last-n-minutes 60
+
+    \b
+    TAG FILTERING (both modes):
+      - --tag TAG: Filter traces by tag (can be repeated for multiple tags)
+      - --all-tags: Require ALL tags to match (AND logic, default is OR)
+      - Examples:
+          langsmith-fetch traces --tag production --limit 10
+          langsmith-fetch traces --tag prod --tag staging       # OR: prod OR staging
+          langsmith-fetch traces --tag prod --tag critical --all-tags  # AND: prod AND critical
 
     \b
     IMPORTANT:
@@ -768,27 +793,54 @@ def traces(
             sys.exit(1)
 
         # Fetch traces
-        click.echo(f"Fetching up to {limit} recent trace(s)...")
-        try:
-            traces_data, timing_info = fetchers.fetch_recent_traces(
-                api_key=api_key,
-                base_url=base_url,
-                limit=limit,
-                project_uuid=project_uuid,
-                last_n_minutes=last_n_minutes,
-                since=since,
-                max_workers=max_concurrent,
-                show_progress=not no_progress,
-                return_timing=True,
-                include_metadata=include_metadata,
-                include_feedback=include_feedback,
-            )
-        except ValueError as e:
-            click.echo(f"Error: {e}", err=True)
-            sys.exit(1)
-        except Exception as e:
-            click.echo(f"Error fetching traces: {e}", err=True)
-            sys.exit(1)
+        if tags:
+            tag_list = list(tags)
+            tag_desc = ", ".join(tag_list)
+            click.echo(f"Fetching up to {limit} trace(s) with tags: {tag_desc}...")
+            try:
+                traces_data, timing_info = fetchers.fetch_traces_by_tags(
+                    api_key=api_key,
+                    base_url=base_url,
+                    tags=tag_list,
+                    match_all_tags=all_tags,
+                    limit=limit,
+                    project_uuid=project_uuid,
+                    last_n_minutes=last_n_minutes,
+                    since=since,
+                    max_workers=max_concurrent,
+                    show_progress=not no_progress,
+                    return_timing=True,
+                    include_metadata=include_metadata,
+                    include_feedback=include_feedback,
+                )
+            except ValueError as e:
+                click.echo(f"Error: {e}", err=True)
+                sys.exit(1)
+            except Exception as e:
+                click.echo(f"Error fetching traces: {e}", err=True)
+                sys.exit(1)
+        else:
+            click.echo(f"Fetching up to {limit} recent trace(s)...")
+            try:
+                traces_data, timing_info = fetchers.fetch_recent_traces(
+                    api_key=api_key,
+                    base_url=base_url,
+                    limit=limit,
+                    project_uuid=project_uuid,
+                    last_n_minutes=last_n_minutes,
+                    since=since,
+                    max_workers=max_concurrent,
+                    show_progress=not no_progress,
+                    return_timing=True,
+                    include_metadata=include_metadata,
+                    include_feedback=include_feedback,
+                )
+            except ValueError as e:
+                click.echo(f"Error: {e}", err=True)
+                sys.exit(1)
+            except Exception as e:
+                click.echo(f"Error fetching traces: {e}", err=True)
+                sys.exit(1)
 
         # Display timing information
         total_time = timing_info.get("total_duration", 0)
@@ -844,19 +896,37 @@ def traces(
 
         try:
             # Fetch traces
-            traces_data = fetchers.fetch_recent_traces(
-                api_key=api_key,
-                base_url=base_url,
-                limit=limit,
-                project_uuid=project_uuid,
-                last_n_minutes=last_n_minutes,
-                since=since,
-                max_workers=max_concurrent,
-                show_progress=not no_progress,
-                return_timing=False,
-                include_metadata=include_metadata,
-                include_feedback=include_feedback,
-            )
+            if tags:
+                tag_list = list(tags)
+                traces_data = fetchers.fetch_traces_by_tags(
+                    api_key=api_key,
+                    base_url=base_url,
+                    tags=tag_list,
+                    match_all_tags=all_tags,
+                    limit=limit,
+                    project_uuid=project_uuid,
+                    last_n_minutes=last_n_minutes,
+                    since=since,
+                    max_workers=max_concurrent,
+                    show_progress=not no_progress,
+                    return_timing=False,
+                    include_metadata=include_metadata,
+                    include_feedback=include_feedback,
+                )
+            else:
+                traces_data = fetchers.fetch_recent_traces(
+                    api_key=api_key,
+                    base_url=base_url,
+                    limit=limit,
+                    project_uuid=project_uuid,
+                    last_n_minutes=last_n_minutes,
+                    since=since,
+                    max_workers=max_concurrent,
+                    show_progress=not no_progress,
+                    return_timing=False,
+                    include_metadata=include_metadata,
+                    include_feedback=include_feedback,
+                )
 
             # For limit=1, output single trace directly
             if limit == 1 and len(traces_data) == 1:

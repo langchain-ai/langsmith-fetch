@@ -9,7 +9,13 @@ from typing import Any
 
 import requests
 from rich.console import Console
-from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+)
 
 try:
     from langsmith import Client  # noqa: F401
@@ -81,10 +87,13 @@ def fetch_trace(trace_id: str, *, base_url: str, api_key: str) -> list[dict[str,
 
     data = response.json()
 
-    # Extract messages from outputs
+    # First try standard message locations, then fall back to full outputs
     messages = data.get("messages")
-    output_messages = (data.get("outputs") or {}).get("messages")
-    return messages or output_messages or []
+    outputs = data.get("outputs") or {}
+    output_messages = outputs.get("messages")
+
+    # Return messages if found, otherwise return full outputs dict (for custom agents)
+    return messages or output_messages or outputs or []
 
 
 def fetch_recent_threads(
@@ -169,9 +178,16 @@ def fetch_recent_threads(
                 break
 
     # Fetch messages for each thread with concurrent fetching and progress bar
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
     import sys
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from rich.progress import (
+        BarColumn,
+        Progress,
+        SpinnerColumn,
+        TaskProgressColumn,
+        TextColumn,
+    )
 
     def _fetch_thread_safe(thread_id: str) -> tuple[str, list[dict[str, Any]] | None]:
         """Safe wrapper for fetch_thread that returns (thread_id, messages or None)."""
@@ -416,7 +432,7 @@ def _fetch_traces_concurrent(
         timing_info["feedback_duration"] = perf_counter() - feedback_start
 
         # Add feedback to corresponding traces
-        for idx, (trace_id, trace_data) in enumerate(results):
+        for trace_id, trace_data in results:
             if trace_id in feedback_map:
                 trace_data["feedback"] = feedback_map[trace_id]
 
@@ -525,6 +541,158 @@ def fetch_recent_traces(
         raise ValueError("No traces found matching criteria")
 
     # Fetch messages (and metadata/feedback if requested) for each trace using concurrent fetching
+    results, timing_info = _fetch_traces_concurrent(
+        runs=runs,
+        base_url=base_url,
+        api_key=api_key,
+        max_workers=max_workers,
+        show_progress=show_progress,
+        include_metadata=include_metadata,
+        include_feedback=include_feedback,
+    )
+
+    if not results:
+        raise ValueError(
+            f"Successfully queried {len(runs)} traces but failed to fetch messages for all of them"
+        )
+
+    # Add list_runs timing to timing info
+    timing_info["list_runs_duration"] = list_duration
+    timing_info["total_duration"] = list_duration + timing_info["fetch_duration"]
+
+    if return_timing:
+        return results, timing_info
+    return results
+
+
+def fetch_traces_by_tags(
+    api_key: str,
+    base_url: str,
+    tags: list[str],
+    limit: int = 100,
+    project_uuid: str | None = None,
+    match_all_tags: bool = False,
+    last_n_minutes: int | None = None,
+    since: str | None = None,
+    max_workers: int = 5,
+    show_progress: bool = True,
+    return_timing: bool = False,
+    include_metadata: bool = False,
+    include_feedback: bool = False,
+) -> (
+    list[tuple[str, list[dict[str, Any]] | dict[str, Any]]]
+    | tuple[list[tuple[str, list[dict[str, Any]] | dict[str, Any]]], dict]
+):
+    """Fetch traces that have specific tags from LangSmith.
+
+    Searches for root traces that match the specified tag(s) and returns
+    their messages with optional metadata and feedback.
+
+    Args:
+        api_key: LangSmith API key for authentication
+        base_url: LangSmith base URL (e.g., https://api.smith.langchain.com)
+        tags: List of tags to filter by. At least one tag is required.
+        limit: Maximum number of traces to fetch (default: 100)
+        project_uuid: Optional project UUID to filter traces to a specific project.
+        match_all_tags: If True, requires ALL tags (AND logic). If False, requires
+            ANY tag (OR logic). Default is False (OR logic).
+        last_n_minutes: Optional time window to limit search.
+        since: Optional ISO timestamp string to limit search.
+        max_workers: Maximum number of concurrent fetch requests (default: 5)
+        show_progress: Whether to show progress bar during fetching (default: True)
+        return_timing: Whether to return timing information along with results
+        include_metadata: Whether to include metadata in results
+        include_feedback: Whether to fetch full feedback objects
+
+    Returns:
+        If return_timing=False: List of (trace_id, trace_data) tuples
+        If return_timing=True: Tuple of (traces list, timing_dict)
+
+    Raises:
+        ValueError: If no tags provided or no traces found matching criteria
+        Exception: If API request fails or langsmith package not installed
+
+    Example:
+        >>> # Fetch traces with any of the specified tags (OR)
+        >>> traces = fetch_traces_by_tags(
+        ...     api_key="lsv2_...",
+        ...     base_url="https://api.smith.langchain.com",
+        ...     tags=["production", "staging"],
+        ...     limit=10
+        ... )
+        >>> # Fetch traces that have ALL specified tags (AND)
+        >>> traces = fetch_traces_by_tags(
+        ...     api_key="lsv2_...",
+        ...     base_url="https://api.smith.langchain.com",
+        ...     tags=["production", "critical"],
+        ...     match_all_tags=True,
+        ...     limit=10
+        ... )
+    """
+    if not tags:
+        raise ValueError("At least one tag is required")
+
+    if not HAS_LANGSMITH:
+        raise ImportError(
+            "langsmith package required for fetching traces by tags. "
+            "Install with: pip install langsmith"
+        )
+
+    from datetime import datetime, timedelta, timezone
+
+    from langsmith import Client
+
+    # Initialize client
+    client = Client(api_key=api_key)
+
+    # Build tag filter
+    tag_filters = [f'has(tags, "{tag}")' for tag in tags]
+    if match_all_tags:
+        # AND logic - require all tags
+        tag_filter_str = ", ".join(tag_filters)
+    else:
+        # OR logic - require any tag
+        tag_filter_str = " or ".join(tag_filters)
+
+    # Build complete filter combining root trace filter with tag filter
+    base_filter = 'eq(is_root, true), neq(status, "pending")'
+    if match_all_tags:
+        # For AND logic, all conditions are in the 'and()' function
+        filter_str = f"and({base_filter}, {tag_filter_str})"
+    elif len(tags) == 1:
+        # Single tag - no need for extra parentheses
+        filter_str = f"and({base_filter}, {tag_filter_str})"
+    else:
+        # For OR logic with multiple tags, wrap the OR clause in parentheses
+        filter_str = f"and({base_filter}, ({tag_filter_str}))"
+
+    # Build filter parameters
+    filter_params = {
+        "filter": filter_str,
+        "limit": limit,
+    }
+
+    if project_uuid is not None:
+        filter_params["project_id"] = project_uuid
+
+    # Add time filtering
+    if last_n_minutes is not None:
+        start_time = datetime.now(timezone.utc) - timedelta(minutes=last_n_minutes)
+        filter_params["start_time"] = start_time
+    elif since is not None:
+        since_clean = since.replace("Z", "+00:00")
+        start_time = datetime.fromisoformat(since_clean)
+        filter_params["start_time"] = start_time
+
+    # Fetch runs
+    list_start = perf_counter()
+    runs = list(client.list_runs(**filter_params))
+    list_duration = perf_counter() - list_start
+
+    if not runs:
+        raise ValueError("No traces found matching criteria")
+
+    # Fetch messages for each trace using concurrent fetching
     results, timing_info = _fetch_traces_concurrent(
         runs=runs,
         base_url=base_url,
@@ -802,8 +970,13 @@ def fetch_trace_with_metadata(
 
     data = response.json()
 
-    # Extract messages
-    messages = data.get("messages") or (data.get("outputs") or {}).get("messages") or []
+    # First try standard message locations, then fall back to full outputs
+    messages = data.get("messages")
+    outputs = data.get("outputs") or {}
+    output_messages = outputs.get("messages")
+
+    # Return messages if found, otherwise return full outputs dict (for custom agents)
+    messages = messages or output_messages or outputs or []
 
     # Extract metadata from the full Run object
     metadata = _extract_run_metadata(data)
