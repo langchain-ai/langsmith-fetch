@@ -843,10 +843,10 @@ class TestFetchTracesByTags:
 
     @responses.activate
     @patch("langsmith.Client")
-    def test_fetch_traces_multiple_tags_or_logic(
+    def test_fetch_traces_multiple_tags(
         self, mock_client_class, sample_trace_response
     ):
-        """Test fetching traces with multiple tags using OR logic (default)."""
+        """Test fetching traces with multiple tags (AND logic)."""
         mock_client = Mock()
         mock_run1 = Mock()
         mock_run1.id = "trace-1"
@@ -882,17 +882,15 @@ class TestFetchTracesByTags:
             api_key=TEST_API_KEY,
             base_url=TEST_BASE_URL,
             tags=[TEST_TAG_1, TEST_TAG_3],
-            match_all_tags=False,  # OR logic (default)
             include_metadata=False,
             include_feedback=False,
         )
 
-        # Verify OR logic in filter
+        # Verify AND logic in filter (multiple tags always use AND)
         call_kwargs = mock_client.list_runs.call_args[1]
         filter_str = call_kwargs["filter"]
         assert f'has(tags, "{TEST_TAG_1}")' in filter_str
         assert f'has(tags, "{TEST_TAG_3}")' in filter_str
-        assert " or " in filter_str.lower()
 
         assert len(traces_data) == 2
 
@@ -924,7 +922,6 @@ class TestFetchTracesByTags:
             api_key=TEST_API_KEY,
             base_url=TEST_BASE_URL,
             tags=[TEST_TAG_1, TEST_TAG_2],
-            match_all_tags=True,  # AND logic
             include_metadata=False,
             include_feedback=False,
         )

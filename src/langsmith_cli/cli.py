@@ -33,6 +33,23 @@ def sanitize_filename(filename: str) -> str:
     return safe_name
 
 
+def parse_comma_separated_tags(ctx, param, value):
+    """Parse comma-separated tags into a flat list.
+
+    Supports both repeated flags and comma-separated values:
+        --tag tag1 --tag tag2
+        --tag tag1,tag2
+        --tag tag1,tag2 --tag tag3
+    """
+    if not value:
+        return ()
+    result = []
+    for item in value:
+        # Split by comma and strip whitespace
+        result.extend(tag.strip() for tag in item.split(",") if tag.strip())
+    return tuple(result)
+
+
 @click.group()
 def main():
     """LangSmith Fetch - Fetch and display LangSmith threads and traces.
@@ -635,13 +652,8 @@ def threads(
     "tags",
     multiple=True,
     metavar="TAG",
-    help="Filter traces by tag. Can be specified multiple times for OR logic (any tag matches).",
-)
-@click.option(
-    "--all-tags",
-    is_flag=True,
-    default=False,
-    help="Require ALL tags to match (AND logic) instead of ANY tag (OR logic).",
+    callback=parse_comma_separated_tags,
+    help="Filter traces by tag. Supports comma-separated values (tag1,tag2) or multiple flags.",
 )
 def traces(
     output_dir,
@@ -657,7 +669,6 @@ def traces(
     include_metadata,
     include_feedback,
     tags,
-    all_tags,
 ):
     """Fetch recent traces from LangSmith BY CHRONOLOGICAL TIME.
 
@@ -696,12 +707,11 @@ def traces(
 
     \b
     TAG FILTERING (both modes):
-      - --tag TAG: Filter traces by tag (can be repeated for multiple tags)
-      - --all-tags: Require ALL tags to match (AND logic, default is OR)
+      - --tag TAG: Filter traces by tag (comma-separated or repeated)
+      - Multiple tags use AND logic (all tags must match)
       - Examples:
           langsmith-fetch traces --tag production --limit 10
-          langsmith-fetch traces --tag prod --tag staging       # OR: prod OR staging
-          langsmith-fetch traces --tag prod --tag critical --all-tags  # AND: prod AND critical
+          langsmith-fetch traces --tag prod,critical            # AND: prod AND critical
 
     \b
     IMPORTANT:
@@ -802,7 +812,6 @@ def traces(
                     api_key=api_key,
                     base_url=base_url,
                     tags=tag_list,
-                    match_all_tags=all_tags,
                     limit=limit,
                     project_uuid=project_uuid,
                     last_n_minutes=last_n_minutes,
@@ -902,7 +911,6 @@ def traces(
                     api_key=api_key,
                     base_url=base_url,
                     tags=tag_list,
-                    match_all_tags=all_tags,
                     limit=limit,
                     project_uuid=project_uuid,
                     last_n_minutes=last_n_minutes,

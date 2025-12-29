@@ -908,25 +908,6 @@ class TestTracesCommandTagOption:
         call_kwargs = mock_fetch.call_args[1]
         assert set(call_kwargs["tags"]) == {"prod", "staging"}
 
-    @patch("langsmith_cli.fetchers.fetch_traces_by_tags")
-    @patch("langsmith_cli.config.get_api_key")
-    @patch("langsmith_cli.config.get_base_url")
-    def test_traces_all_tags_flag(self, mock_base_url, mock_api_key, mock_fetch):
-        """Test traces command with --all-tags flag for AND logic."""
-        mock_api_key.return_value = "test-key"
-        mock_base_url.return_value = "https://api.smith.langchain.com"
-        mock_fetch.return_value = [("trace-1", [{"content": "test"}])]
-
-        runner = CliRunner()
-        result = runner.invoke(
-            main,
-            ["traces", "--tag", "prod", "--tag", "critical", "--all-tags", "--format", "raw"],
-        )
-
-        assert result.exit_code == 0
-        call_kwargs = mock_fetch.call_args[1]
-        assert call_kwargs["match_all_tags"] is True
-
     @patch("langsmith_cli.config.get_api_key")
     def test_traces_tag_requires_api_key(self, mock_api_key):
         """Test that --tag option still requires API key."""

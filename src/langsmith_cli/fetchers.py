@@ -571,7 +571,6 @@ def fetch_traces_by_tags(
     tags: list[str],
     limit: int = 100,
     project_uuid: str | None = None,
-    match_all_tags: bool = False,
     last_n_minutes: int | None = None,
     since: str | None = None,
     max_workers: int = 5,
@@ -586,16 +585,16 @@ def fetch_traces_by_tags(
     """Fetch traces that have specific tags from LangSmith.
 
     Searches for root traces that match the specified tag(s) and returns
-    their messages with optional metadata and feedback.
+    their messages with optional metadata and feedback. Multiple tags use
+    AND logic (all tags must match).
 
     Args:
         api_key: LangSmith API key for authentication
         base_url: LangSmith base URL (e.g., https://api.smith.langchain.com)
         tags: List of tags to filter by. At least one tag is required.
+            Multiple tags use AND logic (all must match).
         limit: Maximum number of traces to fetch (default: 100)
         project_uuid: Optional project UUID to filter traces to a specific project.
-        match_all_tags: If True, requires ALL tags (AND logic). If False, requires
-            ANY tag (OR logic). Default is False (OR logic).
         last_n_minutes: Optional time window to limit search.
         since: Optional ISO timestamp string to limit search.
         max_workers: Maximum number of concurrent fetch requests (default: 5)
@@ -613,19 +612,18 @@ def fetch_traces_by_tags(
         Exception: If API request fails or langsmith package not installed
 
     Example:
-        >>> # Fetch traces with any of the specified tags (OR)
+        >>> # Fetch traces with a single tag
         >>> traces = fetch_traces_by_tags(
         ...     api_key="lsv2_...",
         ...     base_url="https://api.smith.langchain.com",
-        ...     tags=["production", "staging"],
+        ...     tags=["production"],
         ...     limit=10
         ... )
-        >>> # Fetch traces that have ALL specified tags (AND)
+        >>> # Fetch traces that have ALL specified tags (AND logic)
         >>> traces = fetch_traces_by_tags(
         ...     api_key="lsv2_...",
         ...     base_url="https://api.smith.langchain.com",
         ...     tags=["production", "critical"],
-        ...     match_all_tags=True,
         ...     limit=10
         ... )
     """
@@ -645,26 +643,13 @@ def fetch_traces_by_tags(
     # Initialize client
     client = Client(api_key=api_key)
 
-    # Build tag filter
+    # Build tag filter - always AND logic (all tags must match)
     tag_filters = [f'has(tags, "{tag}")' for tag in tags]
-    if match_all_tags:
-        # AND logic - require all tags
-        tag_filter_str = ", ".join(tag_filters)
-    else:
-        # OR logic - require any tag
-        tag_filter_str = " or ".join(tag_filters)
+    tag_filter_str = ", ".join(tag_filters)
 
     # Build complete filter combining root trace filter with tag filter
     base_filter = 'eq(is_root, true), neq(status, "pending")'
-    if match_all_tags:
-        # For AND logic, all conditions are in the 'and()' function
-        filter_str = f"and({base_filter}, {tag_filter_str})"
-    elif len(tags) == 1:
-        # Single tag - no need for extra parentheses
-        filter_str = f"and({base_filter}, {tag_filter_str})"
-    else:
-        # For OR logic with multiple tags, wrap the OR clause in parentheses
-        filter_str = f"and({base_filter}, ({tag_filter_str}))"
+    filter_str = f"and({base_filter}, {tag_filter_str})"
 
     # Build filter parameters
     filter_params = {

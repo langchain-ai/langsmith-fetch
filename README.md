@@ -43,11 +43,11 @@ langsmith-fetch thread my-thread-id
 # Single tag
 langsmith-fetch traces ./my-traces --tag production --limit 10
 
-# Multiple tags (OR logic - matches any tag)
-langsmith-fetch traces --tag prod --tag staging --limit 10
+# Multiple tags (AND logic - all tags must match)
+langsmith-fetch traces --tag prod,critical --limit 10
 
-# Multiple tags (AND logic - requires all tags)
-langsmith-fetch traces --tag prod --tag critical --all-tags --limit 5
+# Same as above using repeated flags
+langsmith-fetch traces --tag prod --tag critical --limit 10
 ```
 
 **Include metadata and feedback:**
@@ -82,8 +82,7 @@ Use langsmith-fetch to fetch recent LangSmith traces. Run langsmith-fetch --help
 | `--file <path>` | `trace`, `thread` | Save to file instead of stdout | stdout |
 | `--include-metadata` | `traces` | Include run metadata (status, timing, tokens, costs) | Not included |
 | `--include-feedback` | `traces` | Include feedback data (requires extra API call) | Not included |
-| `-t, --tag <tag>` | `traces` | Filter by tag (repeat for multiple tags) | None |
-| `--all-tags` | `traces` | Require ALL tags to match (AND logic) | OR logic (any tag) |
+| `-t, --tag <tag>` | `traces` | Filter by tag (comma-separated or repeated, AND logic) | None |
 | `--max-concurrent <int>` | `traces`, `threads` | Concurrent fetches (max 10 recommended) | 5 |
 | `--no-progress` | `traces`, `threads` | Disable progress bar | Progress shown |
 
