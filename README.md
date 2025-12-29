@@ -38,6 +38,18 @@ langsmith-fetch thread my-thread-id
 
 ![Usage Example](images/usage-example.jpg)
 
+**Filter traces by tags:**
+```bash
+# Single tag
+langsmith-fetch traces ./my-traces --tag production --limit 10
+
+# Multiple tags (AND logic - all tags must match)
+langsmith-fetch traces --tag prod,critical --limit 10
+
+# Same as above using repeated flags
+langsmith-fetch traces --tag prod --tag critical --limit 10
+```
+
 **Include metadata and feedback:**
 ```bash
 langsmith-fetch traces ./my-traces --limit 10 --include-metadata --include-feedback
@@ -70,6 +82,7 @@ Use langsmith-fetch to fetch recent LangSmith traces. Run langsmith-fetch --help
 | `--file <path>` | `trace`, `thread` | Save to file instead of stdout | stdout |
 | `--include-metadata` | `traces` | Include run metadata (status, timing, tokens, costs) | Not included |
 | `--include-feedback` | `traces` | Include feedback data (requires extra API call) | Not included |
+| `-t, --tag <tag>` | `traces` | Filter by tag (comma-separated or repeated, AND logic) | None |
 | `--max-concurrent <int>` | `traces`, `threads` | Concurrent fetches (max 10 recommended) | 5 |
 | `--no-progress` | `traces`, `threads` | Disable progress bar | Progress shown |
 
@@ -122,7 +135,7 @@ pytest tests/ -v
 pytest tests/ --cov=langsmith_cli
 ```
 
-The test suite includes 71 tests covering:
+The test suite includes 86 tests covering:
 - All CLI commands (traces, trace, thread, threads, config)
 - All output formats (pretty, json, raw)
 - Config management and storage
