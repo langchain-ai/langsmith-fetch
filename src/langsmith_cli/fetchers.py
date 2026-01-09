@@ -57,6 +57,76 @@ def fetch_thread(
     return messages
 
 
+def _extract_messages_from_child_runs(
+    root_data: dict[str, Any], *, base_url: str, api_key: str
+) -> list[dict[str, Any]]:
+    """
+    Extract messages from child runs for traces that don't have messages at root level.
+
+    This handles traces from wrap_openai() where messages are stored in child LLM runs.
+
+    Args:
+        root_data: The root run data dictionary
+        base_url: LangSmith base URL
+        api_key: LangSmith API key
+
+    Returns:
+        List of message dictionaries, or empty list if no messages found
+    """
+    child_run_ids = root_data.get("child_run_ids", [])
+    if not child_run_ids:
+        return []
+
+    headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
+
+    # Fetch all child runs and filter for LLM runs
+    llm_runs = []
+    for child_id in child_run_ids:
+        try:
+            url = f"{base_url}/runs/{child_id}"
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            child_data = response.json()
+
+            if child_data.get("run_type") == "llm":
+                llm_runs.append(child_data)
+        except Exception:
+            # Skip failed child run fetches
+            continue
+
+    if not llm_runs:
+        return []
+
+    # Sort by start_time to get chronological order (most recent last)
+    llm_runs.sort(key=lambda r: r.get("start_time", ""))
+
+    # Get the last LLM run (most recent)
+    last_llm_run = llm_runs[-1]
+
+    # Extract messages from inputs
+    messages = last_llm_run.get("inputs", {}).get("messages", [])
+    if not messages:
+        return []
+
+    # Try to append the final output message
+    try:
+        outputs = last_llm_run.get("outputs", {})
+
+        # Handle OpenAI format (choices array)
+        if "choices" in outputs and outputs["choices"]:
+            final_message = outputs["choices"][0].get("message")
+            if final_message:
+                messages.append(final_message)
+        # Handle other formats that might have direct message
+        elif "message" in outputs:
+            messages.append(outputs["message"])
+    except (KeyError, IndexError, TypeError):
+        # If we can't get the output message, just return input messages
+        pass
+
+    return messages
+
+
 def fetch_trace(trace_id: str, *, base_url: str, api_key: str) -> list[dict[str, Any]]:
     """
     Fetch messages for a single trace by trace ID.
@@ -81,10 +151,15 @@ def fetch_trace(trace_id: str, *, base_url: str, api_key: str) -> list[dict[str,
 
     data = response.json()
 
-    # Extract messages from outputs
+    # Extract messages from outputs (LangGraph/LangChain standard format)
     messages = data.get("messages")
     output_messages = (data.get("outputs") or {}).get("messages")
-    return messages or output_messages or []
+
+    if messages or output_messages:
+        return messages or output_messages
+
+    # Fallback: Extract from child runs (wrap_openai format)
+    return _extract_messages_from_child_runs(data, base_url=base_url, api_key=api_key)
 
 
 def fetch_recent_threads(
