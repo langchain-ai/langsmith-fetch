@@ -61,9 +61,10 @@ def _extract_messages_from_child_runs(
     root_data: dict[str, Any], *, base_url: str, api_key: str
 ) -> list[dict[str, Any]]:
     """
-    Extract messages from child runs for traces that don't have messages at root level.
+    Extract data from all direct child runs for traces that don't have messages at root level.
 
-    This handles traces from wrap_openai() where messages are stored in child LLM runs.
+    This handles traces with @traceable decorated functions that create child runs,
+    including wrap_openai() traces, tool calls, chains, and other operations.
 
     Args:
         root_data: The root run data dictionary
@@ -71,7 +72,8 @@ def _extract_messages_from_child_runs(
         api_key: LangSmith API key
 
     Returns:
-        List of message dictionaries, or empty list if no messages found
+        List of child run dictionaries with key fields (name, run_type, inputs, outputs,
+        error, status, start_time) in chronological order, or empty list if no runs found
     """
     child_run_ids = root_data.get("child_run_ids", [])
     if not child_run_ids:
@@ -79,50 +81,45 @@ def _extract_messages_from_child_runs(
 
     headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
 
-    # Fetch all child runs and filter for LLM runs
-    llm_runs = []
+    # Fetch all child runs
+    child_runs = []
     for child_id in child_run_ids:
         try:
             url = f"{base_url}/runs/{child_id}"
             response = requests.get(url, headers=headers)
             response.raise_for_status()
             child_data = response.json()
-
-            if child_data.get("run_type") == "llm":
-                llm_runs.append(child_data)
+            child_runs.append(child_data)
         except Exception:
             # Skip failed child run fetches
             continue
 
-    if not llm_runs:
+    if not child_runs:
         return []
 
-    # Sort by start_time to get chronological order (most recent last)
-    llm_runs.sort(key=lambda r: r.get("start_time", ""))
+    # Sort by start_time to get chronological order
+    child_runs.sort(key=lambda r: r.get("start_time", ""))
 
-    # Get the last LLM run (most recent)
-    last_llm_run = llm_runs[-1]
+    # Extract relevant fields from each child run
+    messages = []
+    for child_run in child_runs:
+        messages.append({
+            "name": child_run.get("name"),
+            "run_type": child_run.get("run_type"),
+            "inputs": child_run.get("inputs"),
+            "outputs": child_run.get("outputs"),
+            "error": child_run.get("error"),
+            "status": child_run.get("status"),
+            "start_time": child_run.get("start_time")
+        })
 
-    # Extract messages from inputs
-    messages = last_llm_run.get("inputs", {}).get("messages", [])
-    if not messages:
-        return []
-
-    # Try to append the final output message
-    try:
-        outputs = last_llm_run.get("outputs", {})
-
-        # Handle OpenAI format (choices array)
-        if "choices" in outputs and outputs["choices"]:
-            final_message = outputs["choices"][0].get("message")
-            if final_message:
-                messages.append(final_message)
-        # Handle other formats that might have direct message
-        elif "message" in outputs:
-            messages.append(outputs["message"])
-    except (KeyError, IndexError, TypeError):
-        # If we can't get the output message, just return input messages
-        pass
+    # Check parent run for errors and append at the end (chronologically last)
+    if root_data.get("error"):
+        messages.append({
+            "role": "error",
+            "content": root_data.get("error"),
+            "status": root_data.get("status")
+        })
 
     return messages
 
