@@ -977,13 +977,22 @@ def fetch_trace_tree(
 
     all_runs = []
     cursor = None
+    max_iterations = 100  # Safety limit for pagination
+    iteration = 0
 
     # Handle pagination
     while True:
+        iteration += 1
+        if iteration > max_iterations:
+            raise ValueError(
+                f"Pagination limit reached ({max_iterations} iterations). "
+                f"Fetched {len(all_runs)} runs so far."
+            )
+
         if cursor:
             body["cursor"] = cursor
 
-        response = requests.post(url, headers=headers, json=body)
+        response = requests.post(url, headers=headers, json=body, timeout=30)
 
         # Handle specific error cases
         if response.status_code == 404:
@@ -1078,7 +1087,7 @@ def fetch_run(
     headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
     url = f"{base_url}/runs/{run_id}"
 
-    response = requests.get(url, headers=headers)
+    response = requests.get(url, headers=headers, timeout=30)
 
     # Handle specific error cases
     if response.status_code == 404:

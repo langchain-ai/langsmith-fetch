@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import click
+import requests
 
 from . import config, fetchers, formatters
 
@@ -1032,7 +1033,9 @@ def tree_cmd(trace_id_or_url, output_dir, format_type, output_file, max_depth, s
         except ValueError as e:
             click.echo(f"Error: {e}", err=True)
             sys.exit(1)
-        except Exception as e:
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except (requests.RequestException, IOError) as e:
             click.echo(f"Error fetching tree: {e}", err=True)
             sys.exit(1)
 
@@ -1058,7 +1061,7 @@ def tree_cmd(trace_id_or_url, output_dir, format_type, output_file, max_depth, s
         summary_file = output_path / "summary.json"
         with open(summary_file, "w") as f:
             json.dump(result["summary"], f, indent=2, default=str)
-        click.echo(f"  ✓ Saved summary.json")
+        click.echo("  ✓ Saved summary.json")
 
         # Generate and save NAVIGATION.md
         navigation_md = generate_navigation_md(
@@ -1071,7 +1074,7 @@ def tree_cmd(trace_id_or_url, output_dir, format_type, output_file, max_depth, s
         nav_file = output_path / "NAVIGATION.md"
         with open(nav_file, "w") as f:
             f.write(navigation_md)
-        click.echo(f"  ✓ Saved NAVIGATION.md")
+        click.echo("  ✓ Saved NAVIGATION.md")
 
         click.echo(f"\n✓ Trace data saved to {output_path}/")
         click.echo(f"  Use: langsmith-fetch run <run-id> --output-dir {output_path}")
@@ -1208,7 +1211,9 @@ def run_cmd(run_id, output_dir, format_type, output_file, include_events, extrac
     except ValueError as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
-    except Exception as e:
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except (requests.RequestException, IOError, json.JSONDecodeError) as e:
         click.echo(f"Error fetching run: {e}", err=True)
         sys.exit(1)
 
@@ -1234,7 +1239,9 @@ def run_cmd(run_id, output_dir, format_type, output_file, include_events, extrac
     # OUTPUT MODE: Directory
     if output_dir:
         output_path = Path(output_dir).resolve()
-        run_dir = output_path / "runs" / run_id
+        # Sanitize run_id to prevent path traversal
+        safe_run_id = sanitize_filename(run_id)
+        run_dir = output_path / "runs" / safe_run_id
 
         try:
             run_dir.mkdir(parents=True, exist_ok=True)
@@ -1245,25 +1252,25 @@ def run_cmd(run_id, output_dir, format_type, output_file, include_events, extrac
         # Save run.json (full data)
         with open(run_dir / "run.json", "w") as f:
             json.dump(result, f, indent=2, default=str)
-        click.echo(f"  ✓ Saved run.json")
+        click.echo("  ✓ Saved run.json")
 
         # Save inputs.json
         if isinstance(result, dict) and "inputs" in result:
             with open(run_dir / "inputs.json", "w") as f:
                 json.dump(result["inputs"], f, indent=2, default=str)
-            click.echo(f"  ✓ Saved inputs.json")
+            click.echo("  ✓ Saved inputs.json")
 
         # Save outputs.json
         if isinstance(result, dict) and "outputs" in result:
             with open(run_dir / "outputs.json", "w") as f:
                 json.dump(result["outputs"], f, indent=2, default=str)
-            click.echo(f"  ✓ Saved outputs.json")
+            click.echo("  ✓ Saved outputs.json")
 
         # Save metadata.json
         if isinstance(result, dict) and "metadata" in result:
             with open(run_dir / "metadata.json", "w") as f:
                 json.dump(result["metadata"], f, indent=2, default=str)
-            click.echo(f"  ✓ Saved metadata.json")
+            click.echo("  ✓ Saved metadata.json")
 
         click.echo(f"\n✓ Run data saved to {run_dir}/")
 

@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 
 import requests
 
+from .fetchers import TREE_SELECT_FIELDS
 from .tree import build_tree_from_runs, calculate_tree_summary, extract_run_summary
 
 
@@ -138,29 +139,6 @@ def _is_uuid_like(s: str) -> bool:
     return bool(re.match(uuid_pattern, s, re.IGNORECASE))
 
 
-# Fields to select for tree fetching (same as in fetchers.py)
-TREE_SELECT_FIELDS = [
-    "id",
-    "name",
-    "run_type",
-    "parent_run_id",
-    "child_run_ids",
-    "dotted_order",
-    "status",
-    "error",
-    "start_time",
-    "end_time",
-    "total_tokens",
-    "prompt_tokens",
-    "completion_tokens",
-    "total_cost",
-    "prompt_cost",
-    "completion_cost",
-    "first_token_time",
-    "extra",
-]
-
-
 def fetch_public_trace_tree(
     url_or_trace_id: str,
     *,
@@ -223,13 +201,13 @@ def fetch_public_trace_tree(
         "limit": 1000,
     }
 
-    response = requests.post(url, headers=headers, json=body)
+    response = requests.post(url, headers=headers, json=body, timeout=30)
 
     # If the first approach fails, try alternative endpoints
     if response.status_code == 404:
         # Approach 2: Try querying by share token directly
         url = f"{base_url}/public/{trace_id}/runs"
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, timeout=30)
 
     if response.status_code == 403:
         raise ValueError(
@@ -308,7 +286,7 @@ def fetch_public_run(
     token = share_token or run_id
     url = f"{base_url}/public/{token}/runs/{run_id}"
 
-    response = requests.get(url, headers=headers)
+    response = requests.get(url, headers=headers, timeout=30)
 
     if response.status_code == 403:
         raise ValueError(
