@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import click
+import requests
 
 from . import config, fetchers, formatters
 
@@ -904,6 +905,441 @@ def traces(
         except Exception as e:
             click.echo(f"Error fetching traces: {e}", err=True)
             sys.exit(1)
+
+
+@main.command("tree")
+@click.argument("trace_id_or_url", metavar="TRACE_ID")
+@click.option(
+    "--output-dir",
+    type=click.Path(),
+    metavar="PATH",
+    help="Save tree.json, summary.json, and NAVIGATION.md to directory",
+)
+@click.option(
+    "--format",
+    "format_type",
+    type=click.Choice(["json", "pretty", "summary"]),
+    default="pretty",
+    help="Output format (default: pretty)",
+)
+@click.option(
+    "--file",
+    "output_file",
+    metavar="PATH",
+    help="Save output to specific file (stdout mode only)",
+)
+@click.option(
+    "--max-depth",
+    type=int,
+    metavar="N",
+    help="Limit tree depth in output (default: unlimited)",
+)
+@click.option(
+    "--show-ids",
+    is_flag=True,
+    default=False,
+    help="Include run IDs in pretty output",
+)
+def tree_cmd(trace_id_or_url, output_dir, format_type, output_file, max_depth, show_ids):
+    """Fetch trace execution tree (skeleton only, no inputs/outputs).
+
+    Fetches all runs in a trace with metadata (tokens, cost, duration, status)
+    but NOT the inputs/outputs. This allows exploring trace structure before
+    selectively fetching full data for specific runs.
+
+    \b
+    ARGUMENTS:
+      TRACE_ID    LangSmith trace UUID or public share URL
+
+    \b
+    OUTPUT MODES:
+      --format pretty   Rich formatted tree view (default)
+      --format json     Full tree as JSON
+      --format summary  Compact summary statistics only
+
+    \b
+    EXAMPLES:
+      # View tree structure
+      langsmith-fetch tree 3b0b15fe-1e3a-4aef-afa8-48df15879cfe
+
+      # Save to directory with navigation guide
+      langsmith-fetch tree 3b0b15fe-... --output-dir ./trace-data/
+
+      # Get summary only
+      langsmith-fetch tree 3b0b15fe-... --format summary
+
+      # Public trace URL
+      langsmith-fetch tree https://smith.langchain.com/public/abc123/r
+
+    \b
+    OUTPUT DIRECTORY STRUCTURE (when using --output-dir):
+      {output-dir}/
+      ├── tree.json           # Full tree structure
+      ├── summary.json        # Summary statistics
+      ├── runs/               # For individual run data (initially empty)
+      │   └── .gitkeep
+      └── NAVIGATION.md       # Instructions for exploring the trace
+    """
+    from .tree import format_tree_pretty, generate_navigation_md
+
+    # Get API key
+    base_url = config.get_base_url()
+    api_key = config.get_api_key()
+
+    # Check if this is a public URL
+    is_public_url = trace_id_or_url.startswith("http")
+
+    if is_public_url:
+        # Handle public URL
+        try:
+            from .public import fetch_public_trace_tree, parse_langsmith_url
+
+            parsed = parse_langsmith_url(trace_id_or_url)
+            if parsed["is_public"]:
+                # Fetch without auth
+                result = fetch_public_trace_tree(trace_id_or_url, base_url=base_url)
+            else:
+                # Extract trace_id and use normal fetch
+                if not api_key:
+                    click.echo(
+                        "Error: LANGSMITH_API_KEY required for non-public traces",
+                        err=True,
+                    )
+                    sys.exit(1)
+                result = fetchers.fetch_trace_tree(
+                    parsed["trace_id"], base_url=base_url, api_key=api_key
+                )
+        except ImportError:
+            click.echo(
+                "Error: Public URL support requires the public module", err=True
+            )
+            sys.exit(1)
+        except ValueError as e:
+            click.echo(f"Error: {e}", err=True)
+            sys.exit(1)
+    else:
+        # Direct trace ID - requires auth
+        if not api_key:
+            click.echo(
+                "Error: LANGSMITH_API_KEY not found in environment or config",
+                err=True,
+            )
+            sys.exit(1)
+
+        try:
+            result = fetchers.fetch_trace_tree(
+                trace_id_or_url, base_url=base_url, api_key=api_key
+            )
+        except ValueError as e:
+            click.echo(f"Error: {e}", err=True)
+            sys.exit(1)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except (requests.RequestException, IOError) as e:
+            click.echo(f"Error fetching tree: {e}", err=True)
+            sys.exit(1)
+
+    # OUTPUT MODE: Directory
+    if output_dir:
+        output_path = Path(output_dir).resolve()
+        try:
+            output_path.mkdir(parents=True, exist_ok=True)
+            (output_path / "runs").mkdir(exist_ok=True)
+            # Create .gitkeep in runs directory
+            (output_path / "runs" / ".gitkeep").touch()
+        except (OSError, PermissionError) as e:
+            click.echo(f"Error: Cannot create output directory: {e}", err=True)
+            sys.exit(1)
+
+        # Save tree.json
+        tree_file = output_path / "tree.json"
+        with open(tree_file, "w") as f:
+            json.dump(result, f, indent=2, default=str)
+        click.echo(f"  ✓ Saved tree.json ({result['total_runs']} runs)")
+
+        # Save summary.json
+        summary_file = output_path / "summary.json"
+        with open(summary_file, "w") as f:
+            json.dump(result["summary"], f, indent=2, default=str)
+        click.echo("  ✓ Saved summary.json")
+
+        # Generate and save NAVIGATION.md
+        navigation_md = generate_navigation_md(
+            trace_id=result["trace_id"],
+            tree=result["tree"],
+            summary=result["summary"],
+            output_dir=str(output_path),
+            fetched_at=result["fetched_at"],
+        )
+        nav_file = output_path / "NAVIGATION.md"
+        with open(nav_file, "w") as f:
+            f.write(navigation_md)
+        click.echo("  ✓ Saved NAVIGATION.md")
+
+        click.echo(f"\n✓ Trace data saved to {output_path}/")
+        click.echo(f"  Use: langsmith-fetch run <run-id> --output-dir {output_path}")
+
+    # OUTPUT MODE: File or stdout
+    else:
+        if format_type == "json":
+            output_data = json.dumps(result, indent=2, default=str)
+            if output_file:
+                with open(output_file, "w") as f:
+                    f.write(output_data)
+                click.echo(f"Saved to {output_file}")
+            else:
+                from rich.syntax import Syntax
+                from rich.console import Console
+                console = Console()
+                syntax = Syntax(output_data, "json", theme="monokai", line_numbers=False)
+                console.print(syntax)
+
+        elif format_type == "summary":
+            summary = result["summary"]
+            output_data = json.dumps(summary, indent=2, default=str)
+            if output_file:
+                with open(output_file, "w") as f:
+                    f.write(output_data)
+                click.echo(f"Saved to {output_file}")
+            else:
+                click.echo(f"Trace: {result['trace_id']}")
+                click.echo(f"Total runs: {summary['total_runs']}")
+                click.echo(f"Total tokens: {summary['total_tokens']:,}")
+                click.echo(f"Total cost: ${summary['total_cost']:.5f}")
+                if summary['total_duration_ms']:
+                    click.echo(f"Duration: {summary['total_duration_ms'] / 1000:.2f}s")
+                if summary['models_used']:
+                    click.echo(f"Models: {', '.join(summary['models_used'])}")
+                if summary['has_errors']:
+                    click.echo(f"Errors: {summary['error_count']}")
+
+        else:  # pretty
+            formatted = format_tree_pretty(
+                result["tree"],
+                result["summary"],
+                show_ids=show_ids,
+                max_depth=max_depth,
+            )
+            if output_file:
+                with open(output_file, "w") as f:
+                    f.write(formatted)
+                click.echo(f"Saved to {output_file}")
+            else:
+                click.echo(formatted)
+
+
+@main.command("run")
+@click.argument("run_id", metavar="RUN_ID")
+@click.option(
+    "--output-dir",
+    type=click.Path(),
+    metavar="PATH",
+    help="Save to trace directory structure ({output-dir}/runs/{run-id}/)",
+)
+@click.option(
+    "--format",
+    "format_type",
+    type=click.Choice(["json", "pretty", "raw"]),
+    default="pretty",
+    help="Output format (default: pretty)",
+)
+@click.option(
+    "--file",
+    "output_file",
+    metavar="PATH",
+    help="Save to specific file",
+)
+@click.option(
+    "--include-events",
+    is_flag=True,
+    default=False,
+    help="Include streaming events (can be large)",
+)
+@click.option(
+    "--extract",
+    metavar="FIELD",
+    help="Extract and display specific field only (e.g., inputs.messages)",
+)
+def run_cmd(run_id, output_dir, format_type, output_file, include_events, extract):
+    """Fetch complete data for a single run.
+
+    Retrieves full run data including inputs, outputs, and metadata for a specific
+    run by its UUID.
+
+    \b
+    ARGUMENTS:
+      RUN_ID    LangSmith run UUID
+
+    \b
+    EXAMPLES:
+      # View run data
+      langsmith-fetch run abc123-def456
+
+      # Save to trace directory
+      langsmith-fetch run abc123 --output-dir ./trace-data/
+
+      # Extract specific field
+      langsmith-fetch run abc123 --extract inputs.messages --format json
+
+      # Include streaming events
+      langsmith-fetch run abc123 --include-events
+
+    \b
+    OUTPUT DIRECTORY STRUCTURE (when using --output-dir):
+      {output-dir}/runs/{run-id}/
+      ├── run.json            # Full run data
+      ├── inputs.json         # Just inputs
+      ├── outputs.json        # Just outputs
+      └── metadata.json       # Extracted metadata
+    """
+    # Get API key
+    base_url = config.get_base_url()
+    api_key = config.get_api_key()
+    if not api_key:
+        click.echo(
+            "Error: LANGSMITH_API_KEY not found in environment or config", err=True
+        )
+        sys.exit(1)
+
+    try:
+        result = fetchers.fetch_run(
+            run_id,
+            base_url=base_url,
+            api_key=api_key,
+            include_events=include_events,
+        )
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except (requests.RequestException, IOError, json.JSONDecodeError) as e:
+        click.echo(f"Error fetching run: {e}", err=True)
+        sys.exit(1)
+
+    # Handle --extract option
+    if extract:
+        # Navigate the dot-separated path
+        data = result
+        for part in extract.split("."):
+            if isinstance(data, dict) and part in data:
+                data = data[part]
+            elif isinstance(data, list) and part.isdigit():
+                idx = int(part)
+                if 0 <= idx < len(data):
+                    data = data[idx]
+                else:
+                    click.echo(f"Error: Index {idx} out of range", err=True)
+                    sys.exit(1)
+            else:
+                click.echo(f"Error: Field '{extract}' not found", err=True)
+                sys.exit(1)
+        result = data
+
+    # OUTPUT MODE: Directory
+    if output_dir:
+        output_path = Path(output_dir).resolve()
+        # Sanitize run_id to prevent path traversal
+        safe_run_id = sanitize_filename(run_id)
+        run_dir = output_path / "runs" / safe_run_id
+
+        try:
+            run_dir.mkdir(parents=True, exist_ok=True)
+        except (OSError, PermissionError) as e:
+            click.echo(f"Error: Cannot create directory: {e}", err=True)
+            sys.exit(1)
+
+        # Save run.json (full data)
+        with open(run_dir / "run.json", "w") as f:
+            json.dump(result, f, indent=2, default=str)
+        click.echo("  ✓ Saved run.json")
+
+        # Save inputs.json
+        if isinstance(result, dict) and "inputs" in result:
+            with open(run_dir / "inputs.json", "w") as f:
+                json.dump(result["inputs"], f, indent=2, default=str)
+            click.echo("  ✓ Saved inputs.json")
+
+        # Save outputs.json
+        if isinstance(result, dict) and "outputs" in result:
+            with open(run_dir / "outputs.json", "w") as f:
+                json.dump(result["outputs"], f, indent=2, default=str)
+            click.echo("  ✓ Saved outputs.json")
+
+        # Save metadata.json
+        if isinstance(result, dict) and "metadata" in result:
+            with open(run_dir / "metadata.json", "w") as f:
+                json.dump(result["metadata"], f, indent=2, default=str)
+            click.echo("  ✓ Saved metadata.json")
+
+        click.echo(f"\n✓ Run data saved to {run_dir}/")
+
+    # OUTPUT MODE: File or stdout
+    elif output_file:
+        if format_type == "raw":
+            with open(output_file, "w") as f:
+                json.dump(result, f, default=str)
+        else:
+            with open(output_file, "w") as f:
+                json.dump(result, f, indent=2, default=str)
+        click.echo(f"Saved to {output_file}")
+
+    # OUTPUT MODE: stdout
+    else:
+        if format_type == "raw":
+            click.echo(json.dumps(result, default=str))
+        elif format_type == "json":
+            from rich.syntax import Syntax
+            from rich.console import Console
+            console = Console()
+            json_str = json.dumps(result, indent=2, default=str)
+            syntax = Syntax(json_str, "json", theme="monokai", line_numbers=False)
+            console.print(syntax)
+        else:  # pretty
+            if isinstance(result, dict):
+                click.echo("=" * 60)
+                click.echo(f"RUN: {result.get('name', 'unknown')}")
+                click.echo("=" * 60)
+                click.echo(f"ID: {result.get('id')}")
+                click.echo(f"Type: {result.get('run_type')}")
+                click.echo(f"Status: {result.get('status')}")
+
+                if result.get("error"):
+                    click.echo(f"Error: {result['error']}")
+
+                # Metadata
+                metadata = result.get("metadata", {})
+                if metadata:
+                    click.echo("\nMetadata:")
+                    if metadata.get("duration_ms"):
+                        click.echo(f"  Duration: {metadata['duration_ms']}ms")
+                    token_usage = metadata.get("token_usage", {})
+                    if token_usage.get("total_tokens"):
+                        click.echo(f"  Tokens: {token_usage['total_tokens']}")
+                    costs = metadata.get("costs", {})
+                    if costs.get("total_cost"):
+                        click.echo(f"  Cost: ${costs['total_cost']:.5f}")
+
+                # Inputs preview
+                inputs = result.get("inputs", {})
+                if inputs:
+                    click.echo("\nInputs:")
+                    preview = json.dumps(inputs, indent=2, default=str)
+                    if len(preview) > 500:
+                        preview = preview[:500] + "...(truncated)"
+                    click.echo(preview)
+
+                # Outputs preview
+                outputs = result.get("outputs", {})
+                if outputs:
+                    click.echo("\nOutputs:")
+                    preview = json.dumps(outputs, indent=2, default=str)
+                    if len(preview) > 500:
+                        preview = preview[:500] + "...(truncated)"
+                    click.echo(preview)
+            else:
+                # Extracted data (from --extract)
+                click.echo(json.dumps(result, indent=2, default=str))
 
 
 @main.group()

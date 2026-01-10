@@ -1,0 +1,103 @@
+{
+  "runs": [
+    {
+      "id": "root-uuid-1234",
+      "name": "handleEpicChat",
+      "run_type": "chain",
+      "parent_run_id": null,
+      "child_run_ids": ["child-uuid-1", "child-uuid-2"],
+      "dotted_order": "20250110T120000000000Z",
+      "status": "success",
+      "error": null,
+      "start_time": "2025-01-10T12:00:00.000Z",
+      "end_time": "2025-01-10T12:03:52.120Z",
+      "total_tokens": 705401,
+      "prompt_tokens": 650000,
+      "completion_tokens": 55401,
+      "total_cost": 0.4614,
+      "prompt_cost": 0.39,
+      "completion_cost": 0.0714,
+      "first_token_time": "2025-01-10T12:00:01.500Z",
+      "extra": {
+        "metadata": {
+          "thread_id": "test-thread-123",
+          "ls_model_name": "claude-sonnet-4-20250514"
+        },
+        "runtime": {}
+      }
+    },
+    {
+      "id": "child-uuid-1",
+      "name": "generateEpicResponse",
+      "run_type": "chain",
+      "parent_run_id": "root-uuid-1234",
+      "child_run_ids": ["grandchild-uuid-1"],
+      "dotted_order": "20250110T120000000000Z.1",
+      "status": "success",
+      "error": null,
+      "start_time": "2025-01-10T12:00:01.000Z",
+      "end_time": "2025-01-10T12:02:00.000Z",
+      "total_tokens": 350000,
+      "prompt_tokens": 320000,
+      "completion_tokens": 30000,
+      "total_cost": 0.23,
+      "prompt_cost": 0.19,
+      "completion_cost": 0.04,
+      "first_token_time": "2025-01-10T12:00:02.000Z",
+      "extra": {
+        "metadata": {},
+        "runtime": {
+          "model": "claude-sonnet-4-20250514"
+        }
+      }
+    },
+    {
+      "id": "child-uuid-2",
+      "name": "processToolCalls",
+      "run_type": "tool",
+      "parent_run_id": "root-uuid-1234",
+      "child_run_ids": [],
+      "dotted_order": "20250110T120000000000Z.2",
+      "status": "success",
+      "error": null,
+      "start_time": "2025-01-10T12:02:01.000Z",
+      "end_time": "2025-01-10T12:03:00.000Z",
+      "total_tokens": 0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_cost": 0,
+      "prompt_cost": 0,
+      "completion_cost": 0,
+      "first_token_time": null,
+      "extra": {}
+    },
+    {
+      "id": "grandchild-uuid-1",
+      "name": "createStreamChat",
+      "run_type": "llm",
+      "parent_run_id": "child-uuid-1",
+      "child_run_ids": [],
+      "dotted_order": "20250110T120000000000Z.1.1",
+      "status": "success",
+      "error": null,
+      "start_time": "2025-01-10T12:00:05.000Z",
+      "end_time": "2025-01-10T12:01:30.000Z",
+      "total_tokens": 200000,
+      "prompt_tokens": 180000,
+      "completion_tokens": 20000,
+      "total_cost": 0.15,
+      "prompt_cost": 0.11,
+      "completion_cost": 0.04,
+      "first_token_time": "2025-01-10T12:00:06.000Z",
+      "extra": {
+        "metadata": {
+          "ls_model_name": "claude-sonnet-4-20250514"
+        },
+        "invocation_params": {
+          "model": "claude-sonnet-4-20250514",
+          "temperature": 0.7
+        }
+      }
+    }
+  ]
+}
