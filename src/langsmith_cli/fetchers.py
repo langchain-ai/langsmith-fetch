@@ -890,3 +890,227 @@ def fetch_thread_with_metadata(
         "metadata": metadata,
         "feedback": feedback,
     }
+
+
+# ============================================================================
+# Tree and Single Run Fetching
+# ============================================================================
+
+
+# Fields to select for tree fetching (metadata only, no inputs/outputs)
+TREE_SELECT_FIELDS = [
+    "id",
+    "name",
+    "run_type",
+    "parent_run_id",
+    "child_run_ids",
+    "dotted_order",
+    "status",
+    "error",
+    "start_time",
+    "end_time",
+    "total_tokens",
+    "prompt_tokens",
+    "completion_tokens",
+    "total_cost",
+    "prompt_cost",
+    "completion_cost",
+    "first_token_time",
+    "extra",
+]
+
+
+def fetch_trace_tree(
+    trace_id: str,
+    *,
+    base_url: str,
+    api_key: str,
+    max_runs: int = 1000,
+) -> dict[str, Any]:
+    """
+    Fetch all runs in a trace with metadata only (no inputs/outputs).
+
+    Args:
+        trace_id: The root trace UUID (same as root run ID)
+        base_url: LangSmith API base URL
+        api_key: LangSmith API key
+        max_runs: Maximum runs to fetch (default 1000, should cover most traces)
+
+    Returns:
+        Dictionary with structure:
+        {
+            "trace_id": str,
+            "fetched_at": str,  # ISO timestamp
+            "total_runs": int,
+            "root": {...},           # Root run summary
+            "runs_flat": [...],      # All runs as flat list
+            "runs_by_id": {...},     # Runs indexed by ID for quick lookup
+            "tree": {...},           # Hierarchical tree structure
+            "summary": {
+                "total_tokens": int,
+                "total_cost": float,
+                "total_duration_ms": int,
+                "run_types": {"chain": 5, "llm": 3, ...},
+                "models_used": ["claude-sonnet-4-...", "grok-..."],
+                "has_errors": bool,
+                "error_count": int
+            }
+        }
+
+    Raises:
+        requests.HTTPError: If API request fails
+        ValueError: If trace_id is invalid or trace not found
+    """
+    from datetime import datetime, timezone
+
+    from .tree import build_tree_from_runs, calculate_tree_summary, extract_run_summary
+
+    headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
+    url = f"{base_url}/runs/query"
+
+    # Build request body
+    body = {
+        "trace_id": trace_id,
+        "select": TREE_SELECT_FIELDS,
+        "limit": max_runs,
+    }
+
+    all_runs = []
+    cursor = None
+
+    # Handle pagination
+    while True:
+        if cursor:
+            body["cursor"] = cursor
+
+        response = requests.post(url, headers=headers, json=body)
+
+        # Handle specific error cases
+        if response.status_code == 404:
+            raise ValueError(f"Trace not found: {trace_id}")
+        if response.status_code == 401:
+            raise ValueError("Authentication failed. Check your API key.")
+
+        response.raise_for_status()
+
+        data = response.json()
+        runs = data.get("runs", [])
+        all_runs.extend(runs)
+
+        # Check for more pages
+        cursors = data.get("cursors")
+        if cursors and cursors.get("next"):
+            cursor = cursors["next"]
+        else:
+            break
+
+        # Safety check - don't fetch more than max_runs
+        if len(all_runs) >= max_runs:
+            break
+
+    if not all_runs:
+        raise ValueError(f"No runs found for trace: {trace_id}")
+
+    # Build tree structure
+    tree = build_tree_from_runs(all_runs)
+
+    # Calculate summary statistics
+    summary = calculate_tree_summary(all_runs)
+
+    # Build runs_by_id lookup
+    runs_by_id = {}
+    root_summary = None
+    for run in all_runs:
+        run_summary = extract_run_summary(run)
+        runs_by_id[run["id"]] = run_summary
+        if run.get("parent_run_id") is None:
+            root_summary = run_summary
+
+    fetched_at = datetime.now(timezone.utc).isoformat()
+
+    return {
+        "trace_id": trace_id,
+        "fetched_at": fetched_at,
+        "total_runs": len(all_runs),
+        "root": root_summary,
+        "runs_flat": all_runs,
+        "runs_by_id": runs_by_id,
+        "tree": tree,
+        "summary": summary,
+    }
+
+
+def fetch_run(
+    run_id: str,
+    *,
+    base_url: str,
+    api_key: str,
+    include_events: bool = False,
+) -> dict[str, Any]:
+    """
+    Fetch complete data for a single run.
+
+    Args:
+        run_id: The run UUID
+        base_url: LangSmith API base URL
+        api_key: LangSmith API key
+        include_events: Whether to include streaming events (can be large)
+
+    Returns:
+        Complete run data including inputs and outputs:
+        {
+            "id": str,
+            "name": str,
+            "run_type": str,
+            "status": str,
+            "error": str | None,
+            "inputs": dict,       # Full input data
+            "outputs": dict,      # Full output data
+            "metadata": {...},    # Extracted metadata (tokens, cost, timing)
+            "events": [...] | None,
+            "tags": [...],
+            "extra": {...}
+        }
+
+    Raises:
+        requests.HTTPError: If API request fails (404 if run not found)
+    """
+    headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
+    url = f"{base_url}/runs/{run_id}"
+
+    response = requests.get(url, headers=headers)
+
+    # Handle specific error cases
+    if response.status_code == 404:
+        raise ValueError(f"Run not found: {run_id}")
+    if response.status_code == 401:
+        raise ValueError("Authentication failed. Check your API key.")
+
+    response.raise_for_status()
+
+    data = response.json()
+
+    # Extract metadata using existing helper
+    metadata = _extract_run_metadata(data)
+
+    # Build result
+    result = {
+        "id": data.get("id"),
+        "name": data.get("name"),
+        "run_type": data.get("run_type"),
+        "status": data.get("status"),
+        "error": data.get("error"),
+        "inputs": data.get("inputs") or {},
+        "outputs": data.get("outputs") or {},
+        "metadata": metadata,
+        "tags": data.get("tags") or [],
+        "extra": data.get("extra") or {},
+    }
+
+    # Include events if requested
+    if include_events:
+        result["events"] = data.get("events") or []
+    else:
+        result["events"] = None
+
+    return result

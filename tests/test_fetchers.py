@@ -793,3 +793,308 @@ class TestFetchRecentThreads:
         request_body = json.loads(responses.calls[0].request.body)
         assert "start_time" in request_body
         assert len(results) == 1
+
+
+class TestFetchTraceTree:
+    """Tests for fetch_trace_tree function."""
+
+    @responses.activate
+    def test_fetch_trace_tree_success(self):
+        """Test successful tree fetch with mocked API."""
+        # Mock the runs/query endpoint
+        responses.add(
+            responses.POST,
+            f"{TEST_BASE_URL}/runs/query",
+            json={
+                "runs": [
+                    {
+                        "id": "root-run",
+                        "name": "rootRun",
+                        "run_type": "chain",
+                        "parent_run_id": None,
+                        "child_run_ids": ["child-run"],
+                        "dotted_order": "1",
+                        "status": "success",
+                        "error": None,
+                        "start_time": "2025-01-10T12:00:00.000Z",
+                        "end_time": "2025-01-10T12:01:00.000Z",
+                        "total_tokens": 1000,
+                        "prompt_tokens": 800,
+                        "completion_tokens": 200,
+                        "total_cost": 0.01,
+                        "extra": {},
+                    },
+                    {
+                        "id": "child-run",
+                        "name": "childRun",
+                        "run_type": "llm",
+                        "parent_run_id": "root-run",
+                        "child_run_ids": [],
+                        "dotted_order": "1.1",
+                        "status": "success",
+                        "error": None,
+                        "start_time": "2025-01-10T12:00:10.000Z",
+                        "end_time": "2025-01-10T12:00:50.000Z",
+                        "total_tokens": 500,
+                        "prompt_tokens": 400,
+                        "completion_tokens": 100,
+                        "total_cost": 0.005,
+                        "extra": {"metadata": {"ls_model_name": "gpt-4"}},
+                    },
+                ]
+            },
+            status=200,
+        )
+
+        result = fetchers.fetch_trace_tree(
+            "root-run", base_url=TEST_BASE_URL, api_key=TEST_API_KEY
+        )
+
+        assert result["trace_id"] == "root-run"
+        assert result["total_runs"] == 2
+        assert result["tree"] is not None
+        assert result["tree"]["id"] == "root-run"
+        assert len(result["tree"]["children"]) == 1
+        assert result["summary"]["total_runs"] == 2
+        assert result["summary"]["total_tokens"] == 1500
+        assert "runs_by_id" in result
+        assert "root-run" in result["runs_by_id"]
+
+    @responses.activate
+    def test_fetch_trace_tree_not_found(self):
+        """Test tree fetch with 404 error."""
+        responses.add(
+            responses.POST,
+            f"{TEST_BASE_URL}/runs/query",
+            json={"runs": []},
+            status=200,
+        )
+
+        with pytest.raises(ValueError, match="No runs found"):
+            fetchers.fetch_trace_tree(
+                "nonexistent", base_url=TEST_BASE_URL, api_key=TEST_API_KEY
+            )
+
+    @responses.activate
+    def test_fetch_trace_tree_auth_error(self):
+        """Test tree fetch with authentication error."""
+        responses.add(
+            responses.POST,
+            f"{TEST_BASE_URL}/runs/query",
+            json={"error": "Unauthorized"},
+            status=401,
+        )
+
+        with pytest.raises(ValueError, match="Authentication failed"):
+            fetchers.fetch_trace_tree(
+                "test-trace", base_url=TEST_BASE_URL, api_key="bad-key"
+            )
+
+    @responses.activate
+    def test_fetch_trace_tree_api_key_sent(self):
+        """Test that API key is sent in headers."""
+        responses.add(
+            responses.POST,
+            f"{TEST_BASE_URL}/runs/query",
+            json={
+                "runs": [
+                    {
+                        "id": "root",
+                        "name": "root",
+                        "run_type": "chain",
+                        "parent_run_id": None,
+                        "child_run_ids": [],
+                        "status": "success",
+                        "extra": {},
+                    }
+                ]
+            },
+            status=200,
+        )
+
+        fetchers.fetch_trace_tree(
+            "root", base_url=TEST_BASE_URL, api_key=TEST_API_KEY
+        )
+
+        assert len(responses.calls) == 1
+        assert responses.calls[0].request.headers["X-API-Key"] == TEST_API_KEY
+
+    @responses.activate
+    def test_fetch_trace_tree_pagination(self):
+        """Test tree fetch handles pagination correctly."""
+        # First page
+        responses.add(
+            responses.POST,
+            f"{TEST_BASE_URL}/runs/query",
+            json={
+                "runs": [
+                    {
+                        "id": "root",
+                        "name": "root",
+                        "run_type": "chain",
+                        "parent_run_id": None,
+                        "child_run_ids": ["child"],
+                        "status": "success",
+                        "extra": {},
+                    }
+                ],
+                "cursors": {"next": "cursor-123"},
+            },
+            status=200,
+        )
+        # Second page
+        responses.add(
+            responses.POST,
+            f"{TEST_BASE_URL}/runs/query",
+            json={
+                "runs": [
+                    {
+                        "id": "child",
+                        "name": "child",
+                        "run_type": "llm",
+                        "parent_run_id": "root",
+                        "child_run_ids": [],
+                        "status": "success",
+                        "extra": {},
+                    }
+                ],
+                "cursors": {},
+            },
+            status=200,
+        )
+
+        result = fetchers.fetch_trace_tree(
+            "root", base_url=TEST_BASE_URL, api_key=TEST_API_KEY
+        )
+
+        assert len(responses.calls) == 2
+        assert result["total_runs"] == 2
+
+
+class TestFetchRun:
+    """Tests for fetch_run function."""
+
+    @responses.activate
+    def test_fetch_run_success(self):
+        """Test successful single run fetch."""
+        run_data = {
+            "id": "test-run-123",
+            "name": "testRun",
+            "run_type": "llm",
+            "status": "success",
+            "error": None,
+            "inputs": {"messages": [{"role": "user", "content": "Hello"}]},
+            "outputs": {"generations": [{"text": "Hi there!"}]},
+            "tags": ["test", "example"],
+            "extra": {"metadata": {"model": "gpt-4"}},
+            "start_time": "2025-01-10T12:00:00.000Z",
+            "end_time": "2025-01-10T12:00:30.000Z",
+            "total_tokens": 100,
+            "prompt_tokens": 50,
+            "completion_tokens": 50,
+            "total_cost": 0.001,
+        }
+        responses.add(
+            responses.GET,
+            f"{TEST_BASE_URL}/runs/test-run-123",
+            json=run_data,
+            status=200,
+        )
+
+        result = fetchers.fetch_run(
+            "test-run-123", base_url=TEST_BASE_URL, api_key=TEST_API_KEY
+        )
+
+        assert result["id"] == "test-run-123"
+        assert result["name"] == "testRun"
+        assert result["run_type"] == "llm"
+        assert result["status"] == "success"
+        assert "inputs" in result
+        assert "outputs" in result
+        assert "metadata" in result
+        assert result["events"] is None  # Not included by default
+
+    @responses.activate
+    def test_fetch_run_with_events(self):
+        """Test run fetch with events included."""
+        run_data = {
+            "id": "test-run",
+            "name": "testRun",
+            "run_type": "llm",
+            "status": "success",
+            "inputs": {},
+            "outputs": {},
+            "events": [{"type": "token", "data": "hello"}],
+            "extra": {},
+        }
+        responses.add(
+            responses.GET,
+            f"{TEST_BASE_URL}/runs/test-run",
+            json=run_data,
+            status=200,
+        )
+
+        result = fetchers.fetch_run(
+            "test-run",
+            base_url=TEST_BASE_URL,
+            api_key=TEST_API_KEY,
+            include_events=True,
+        )
+
+        assert result["events"] is not None
+        assert len(result["events"]) == 1
+
+    @responses.activate
+    def test_fetch_run_not_found(self):
+        """Test 404 handling for non-existent run."""
+        responses.add(
+            responses.GET,
+            f"{TEST_BASE_URL}/runs/nonexistent",
+            json={"error": "Not found"},
+            status=404,
+        )
+
+        with pytest.raises(ValueError, match="Run not found"):
+            fetchers.fetch_run(
+                "nonexistent", base_url=TEST_BASE_URL, api_key=TEST_API_KEY
+            )
+
+    @responses.activate
+    def test_fetch_run_auth_error(self):
+        """Test authentication error handling."""
+        responses.add(
+            responses.GET,
+            f"{TEST_BASE_URL}/runs/test-run",
+            json={"error": "Unauthorized"},
+            status=401,
+        )
+
+        with pytest.raises(ValueError, match="Authentication failed"):
+            fetchers.fetch_run(
+                "test-run", base_url=TEST_BASE_URL, api_key="bad-key"
+            )
+
+    @responses.activate
+    def test_fetch_run_api_key_sent(self):
+        """Test that API key is sent in headers."""
+        responses.add(
+            responses.GET,
+            f"{TEST_BASE_URL}/runs/test-run",
+            json={
+                "id": "test-run",
+                "name": "test",
+                "run_type": "llm",
+                "status": "success",
+                "inputs": {},
+                "outputs": {},
+                "extra": {},
+            },
+            status=200,
+        )
+
+        fetchers.fetch_run(
+            "test-run", base_url=TEST_BASE_URL, api_key=TEST_API_KEY
+        )
+
+        assert len(responses.calls) == 1
+        assert responses.calls[0].request.headers["X-API-Key"] == TEST_API_KEY
