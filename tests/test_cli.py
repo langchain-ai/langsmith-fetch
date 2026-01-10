@@ -868,3 +868,458 @@ class TestTracesCommand:
         assert "looks like a trace ID" in result.output
         assert "langsmith-fetch trace <trace-id>" in result.output
         assert "langsmith-fetch traces <directory-path>" in result.output
+
+
+class TestTreeCommand:
+    """Tests for tree command."""
+
+    @responses.activate
+    def test_tree_pretty_format(self, mock_env_api_key):
+        """Test tree command with default pretty format."""
+        trace_id = TEST_TRACE_ID
+        responses.add(
+            responses.POST,
+            f"{TEST_BASE_URL}/runs/query",
+            json={
+                "runs": [
+                    {
+                        "id": "root-run",
+                        "name": "rootRun",
+                        "run_type": "chain",
+                        "parent_run_id": None,
+                        "child_run_ids": ["child-1"],
+                        "dotted_order": "1",
+                        "status": "success",
+                        "start_time": "2025-01-10T12:00:00Z",
+                        "end_time": "2025-01-10T12:01:00Z",
+                        "total_tokens": 100,
+                        "total_cost": 0.01,
+                        "extra": {},
+                    },
+                    {
+                        "id": "child-1",
+                        "name": "childRun",
+                        "run_type": "llm",
+                        "parent_run_id": "root-run",
+                        "child_run_ids": [],
+                        "dotted_order": "1.1",
+                        "status": "success",
+                        "start_time": "2025-01-10T12:00:10Z",
+                        "end_time": "2025-01-10T12:00:50Z",
+                        "total_tokens": 100,
+                        "total_cost": 0.01,
+                        "extra": {"metadata": {"ls_model_name": "gpt-4"}},
+                    },
+                ]
+            },
+            status=200,
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["tree", trace_id])
+
+        assert result.exit_code == 0
+        assert "rootRun" in result.output
+        assert "childRun" in result.output
+        assert "TRACE SUMMARY" in result.output
+
+    @responses.activate
+    def test_tree_json_format(self, mock_env_api_key):
+        """Test tree command with json format."""
+        trace_id = TEST_TRACE_ID
+        responses.add(
+            responses.POST,
+            f"{TEST_BASE_URL}/runs/query",
+            json={
+                "runs": [
+                    {
+                        "id": "root-run",
+                        "name": "rootRun",
+                        "run_type": "chain",
+                        "parent_run_id": None,
+                        "child_run_ids": [],
+                        "dotted_order": "1",
+                        "status": "success",
+                        "total_tokens": 100,
+                        "total_cost": 0.01,
+                        "extra": {},
+                    },
+                ]
+            },
+            status=200,
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["tree", trace_id, "--format", "json"])
+
+        assert result.exit_code == 0
+        assert "trace_id" in result.output
+        assert "total_runs" in result.output
+
+    @responses.activate
+    def test_tree_summary_format(self, mock_env_api_key):
+        """Test tree command with summary format."""
+        trace_id = TEST_TRACE_ID
+        responses.add(
+            responses.POST,
+            f"{TEST_BASE_URL}/runs/query",
+            json={
+                "runs": [
+                    {
+                        "id": "root-run",
+                        "name": "rootRun",
+                        "run_type": "chain",
+                        "parent_run_id": None,
+                        "child_run_ids": [],
+                        "dotted_order": "1",
+                        "status": "success",
+                        "start_time": "2025-01-10T12:00:00Z",
+                        "end_time": "2025-01-10T12:01:00Z",
+                        "total_tokens": 500,
+                        "total_cost": 0.05,
+                        "extra": {},
+                    },
+                ]
+            },
+            status=200,
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["tree", trace_id, "--format", "summary"])
+
+        assert result.exit_code == 0
+        assert "Total runs:" in result.output
+        assert "Total tokens:" in result.output
+
+    @responses.activate
+    def test_tree_output_dir(self, mock_env_api_key, tmp_path):
+        """Test tree command with output directory."""
+        trace_id = TEST_TRACE_ID
+        responses.add(
+            responses.POST,
+            f"{TEST_BASE_URL}/runs/query",
+            json={
+                "runs": [
+                    {
+                        "id": "root-run",
+                        "name": "rootRun",
+                        "run_type": "chain",
+                        "parent_run_id": None,
+                        "child_run_ids": [],
+                        "dotted_order": "1",
+                        "status": "success",
+                        "total_tokens": 100,
+                        "total_cost": 0.01,
+                        "extra": {},
+                    },
+                ]
+            },
+            status=200,
+        )
+
+        output_dir = tmp_path / "trace-data"
+        runner = CliRunner()
+        result = runner.invoke(main, ["tree", trace_id, "--output-dir", str(output_dir)])
+
+        assert result.exit_code == 0
+        assert "Saved tree.json" in result.output
+        assert "Saved summary.json" in result.output
+        assert "Saved NAVIGATION.md" in result.output
+        assert (output_dir / "tree.json").exists()
+        assert (output_dir / "summary.json").exists()
+        assert (output_dir / "NAVIGATION.md").exists()
+        assert (output_dir / "runs" / ".gitkeep").exists()
+
+    def test_tree_no_api_key(self, monkeypatch):
+        """Test tree command fails without API key."""
+        monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["tree", TEST_TRACE_ID])
+
+        assert result.exit_code == 1
+        assert "LANGSMITH_API_KEY" in result.output
+
+    @responses.activate
+    def test_tree_not_found(self, mock_env_api_key):
+        """Test tree command handles 404."""
+        trace_id = TEST_TRACE_ID
+        responses.add(
+            responses.POST,
+            f"{TEST_BASE_URL}/runs/query",
+            json={"runs": []},
+            status=200,
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["tree", trace_id])
+
+        assert result.exit_code == 1
+        assert "No runs found" in result.output
+
+    @responses.activate
+    def test_tree_show_ids(self, mock_env_api_key):
+        """Test tree command with --show-ids flag."""
+        trace_id = TEST_TRACE_ID
+        responses.add(
+            responses.POST,
+            f"{TEST_BASE_URL}/runs/query",
+            json={
+                "runs": [
+                    {
+                        "id": "root-run-uuid-123",
+                        "name": "rootRun",
+                        "run_type": "chain",
+                        "parent_run_id": None,
+                        "child_run_ids": [],
+                        "dotted_order": "1",
+                        "status": "success",
+                        "total_tokens": 100,
+                        "total_cost": 0.01,
+                        "extra": {},
+                    },
+                ]
+            },
+            status=200,
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["tree", trace_id, "--show-ids"])
+
+        assert result.exit_code == 0
+        assert "root-run-uuid-123" in result.output
+
+
+class TestRunCommand:
+    """Tests for run command."""
+
+    @responses.activate
+    def test_run_pretty_format(self, mock_env_api_key):
+        """Test run command with default pretty format."""
+        run_id = "test-run-uuid"
+        responses.add(
+            responses.GET,
+            f"{TEST_BASE_URL}/runs/{run_id}",
+            json={
+                "id": run_id,
+                "name": "testRun",
+                "run_type": "llm",
+                "status": "success",
+                "inputs": {"messages": [{"role": "user", "content": "Hello"}]},
+                "outputs": {"result": "Hi there!"},
+                "metadata": {"duration_ms": 1000},
+            },
+            status=200,
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["run", run_id])
+
+        assert result.exit_code == 0
+        assert "testRun" in result.output
+        assert "Status: success" in result.output
+
+    @responses.activate
+    def test_run_json_format(self, mock_env_api_key):
+        """Test run command with json format."""
+        run_id = "test-run-uuid"
+        responses.add(
+            responses.GET,
+            f"{TEST_BASE_URL}/runs/{run_id}",
+            json={
+                "id": run_id,
+                "name": "testRun",
+                "run_type": "llm",
+                "status": "success",
+                "inputs": {},
+                "outputs": {},
+            },
+            status=200,
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["run", run_id, "--format", "json"])
+
+        assert result.exit_code == 0
+        assert '"id"' in result.output
+        assert '"name"' in result.output
+
+    @responses.activate
+    def test_run_raw_format(self, mock_env_api_key):
+        """Test run command with raw format."""
+        run_id = "test-run-uuid"
+        responses.add(
+            responses.GET,
+            f"{TEST_BASE_URL}/runs/{run_id}",
+            json={
+                "id": run_id,
+                "name": "testRun",
+                "run_type": "llm",
+                "status": "success",
+            },
+            status=200,
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["run", run_id, "--format", "raw"])
+
+        assert result.exit_code == 0
+        # Raw format should be compact JSON
+        import json
+        parsed = json.loads(result.output.strip())
+        assert parsed["id"] == run_id
+
+    @responses.activate
+    def test_run_output_dir(self, mock_env_api_key, tmp_path):
+        """Test run command with output directory."""
+        run_id = "test-run-uuid"
+        responses.add(
+            responses.GET,
+            f"{TEST_BASE_URL}/runs/{run_id}",
+            json={
+                "id": run_id,
+                "name": "testRun",
+                "run_type": "llm",
+                "status": "success",
+                "inputs": {"prompt": "Hello"},
+                "outputs": {"text": "Hi"},
+                "metadata": {"model": "gpt-4"},
+            },
+            status=200,
+        )
+
+        output_dir = tmp_path / "trace-data"
+        runner = CliRunner()
+        result = runner.invoke(main, ["run", run_id, "--output-dir", str(output_dir)])
+
+        assert result.exit_code == 0
+        assert "Saved run.json" in result.output
+        assert "Saved inputs.json" in result.output
+        assert "Saved outputs.json" in result.output
+        assert "Saved metadata.json" in result.output
+
+        run_dir = output_dir / "runs" / run_id
+        assert (run_dir / "run.json").exists()
+        assert (run_dir / "inputs.json").exists()
+        assert (run_dir / "outputs.json").exists()
+        assert (run_dir / "metadata.json").exists()
+
+    @responses.activate
+    def test_run_extract_field(self, mock_env_api_key):
+        """Test run command with --extract option."""
+        run_id = "test-run-uuid"
+        responses.add(
+            responses.GET,
+            f"{TEST_BASE_URL}/runs/{run_id}",
+            json={
+                "id": run_id,
+                "inputs": {
+                    "messages": [
+                        {"role": "user", "content": "Hello"},
+                        {"role": "assistant", "content": "Hi"},
+                    ]
+                },
+            },
+            status=200,
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["run", run_id, "--extract", "inputs.messages", "--format", "json"])
+
+        assert result.exit_code == 0
+        assert "user" in result.output
+        assert "Hello" in result.output
+
+    @responses.activate
+    def test_run_extract_nested_index(self, mock_env_api_key):
+        """Test run command with --extract option for array index."""
+        run_id = "test-run-uuid"
+        responses.add(
+            responses.GET,
+            f"{TEST_BASE_URL}/runs/{run_id}",
+            json={
+                "id": run_id,
+                "inputs": {
+                    "messages": [
+                        {"role": "user", "content": "Hello"},
+                        {"role": "assistant", "content": "Hi"},
+                    ]
+                },
+            },
+            status=200,
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["run", run_id, "--extract", "inputs.messages.0", "--format", "raw"])
+
+        assert result.exit_code == 0
+        import json
+        parsed = json.loads(result.output.strip())
+        assert parsed["role"] == "user"
+        assert parsed["content"] == "Hello"
+
+    @responses.activate
+    def test_run_extract_invalid_field(self, mock_env_api_key):
+        """Test run command with --extract for invalid field."""
+        run_id = "test-run-uuid"
+        responses.add(
+            responses.GET,
+            f"{TEST_BASE_URL}/runs/{run_id}",
+            json={"id": run_id, "inputs": {}},
+            status=200,
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["run", run_id, "--extract", "nonexistent.field"])
+
+        assert result.exit_code == 1
+        assert "not found" in result.output
+
+    def test_run_no_api_key(self, monkeypatch):
+        """Test run command fails without API key."""
+        monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["run", "some-run-id"])
+
+        assert result.exit_code == 1
+        assert "LANGSMITH_API_KEY" in result.output
+
+    @responses.activate
+    def test_run_not_found(self, mock_env_api_key):
+        """Test run command handles 404."""
+        run_id = "nonexistent-run"
+        responses.add(
+            responses.GET,
+            f"{TEST_BASE_URL}/runs/{run_id}",
+            json={"error": "Not found"},
+            status=404,
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["run", run_id])
+
+        assert result.exit_code == 1
+        assert "not found" in result.output.lower() or "Error" in result.output
+
+    @responses.activate
+    def test_run_with_events(self, mock_env_api_key):
+        """Test run command with --include-events flag."""
+        run_id = "test-run-uuid"
+        responses.add(
+            responses.GET,
+            f"{TEST_BASE_URL}/runs/{run_id}",
+            json={
+                "id": run_id,
+                "name": "testRun",
+                "status": "success",
+                "events": [{"event": "start"}, {"event": "end"}],
+            },
+            status=200,
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["run", run_id, "--include-events", "--format", "json"])
+
+        assert result.exit_code == 0
+        assert "events" in result.output

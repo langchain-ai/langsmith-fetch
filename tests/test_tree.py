@@ -429,3 +429,192 @@ class TestGenerateNavigationMd:
         assert "Errors:" in md
         assert "Runs with errors:" in md
         assert "err-run" in md
+
+
+class TestTreeEdgeCases:
+    """Edge case tests for tree building functions."""
+
+    def test_build_tree_orphaned_nodes(self):
+        """Test tree building with orphaned nodes (parent doesn't exist)."""
+        runs = [
+            {
+                "id": "root",
+                "name": "rootRun",
+                "run_type": "chain",
+                "parent_run_id": None,
+                "child_run_ids": [],
+                "dotted_order": "1",
+                "status": "success",
+            },
+            {
+                "id": "orphan",
+                "name": "orphanRun",
+                "run_type": "llm",
+                "parent_run_id": "nonexistent-parent",  # Parent doesn't exist
+                "child_run_ids": [],
+                "dotted_order": "2",
+                "status": "success",
+            },
+        ]
+        tree = build_tree_from_runs(runs)
+
+        # Should still build tree with root node
+        assert tree is not None
+        assert tree["id"] == "root"
+        # Orphan node has no parent that exists, so it won't be in root's children
+        assert len(tree["children"]) == 0
+
+    def test_build_tree_missing_dotted_order(self):
+        """Test tree building with missing dotted_order."""
+        runs = [
+            {
+                "id": "root",
+                "name": "rootRun",
+                "run_type": "chain",
+                "parent_run_id": None,
+                "child_run_ids": ["child1", "child2"],
+                "status": "success",
+                # No dotted_order
+            },
+            {
+                "id": "child1",
+                "name": "child1Run",
+                "run_type": "llm",
+                "parent_run_id": "root",
+                "child_run_ids": [],
+                "status": "success",
+                # No dotted_order
+            },
+            {
+                "id": "child2",
+                "name": "child2Run",
+                "run_type": "llm",
+                "parent_run_id": "root",
+                "child_run_ids": [],
+                "status": "success",
+                # No dotted_order
+            },
+        ]
+        tree = build_tree_from_runs(runs)
+
+        assert tree is not None
+        assert len(tree["children"]) == 2
+
+    def test_build_tree_multiple_roots(self):
+        """Test tree building with multiple root nodes (no parent)."""
+        runs = [
+            {
+                "id": "root1",
+                "name": "root1Run",
+                "run_type": "chain",
+                "parent_run_id": None,
+                "child_run_ids": [],
+                "dotted_order": "1",
+                "status": "success",
+            },
+            {
+                "id": "root2",
+                "name": "root2Run",
+                "run_type": "chain",
+                "parent_run_id": None,
+                "child_run_ids": [],
+                "dotted_order": "2",
+                "status": "success",
+            },
+        ]
+        tree = build_tree_from_runs(runs)
+
+        # Should return one of the root nodes
+        assert tree is not None
+        assert tree["id"] in ("root1", "root2")
+
+    def test_extract_run_summary_missing_fields(self):
+        """Test extract_run_summary with minimal run data."""
+        run = {
+            "id": "minimal-run",
+            "name": "minimalRun",
+            "run_type": "chain",
+            # Missing most optional fields
+        }
+        summary = extract_run_summary(run)
+
+        assert summary["id"] == "minimal-run"
+        assert summary["name"] == "minimalRun"
+        assert summary["tokens"] is None
+        assert summary["cost"] is None
+        assert summary["model"] is None
+        assert summary["has_children"] is False
+
+    def test_extract_run_summary_null_fields(self):
+        """Test extract_run_summary handles None values gracefully."""
+        run = {
+            "id": "null-run",
+            "name": "nullRun",
+            "run_type": "llm",
+            "parent_run_id": None,
+            "child_run_ids": None,  # Can be None
+            "status": None,
+            "error": None,
+            "start_time": None,
+            "end_time": None,
+            "total_tokens": None,
+            "total_cost": None,
+            "extra": None,
+        }
+        summary = extract_run_summary(run)
+
+        assert summary["id"] == "null-run"
+        assert summary["has_children"] is False
+        assert summary["child_count"] == 0
+
+    def test_calculate_summary_no_tokens(self):
+        """Test summary calculation with runs that have no token data."""
+        runs = [
+            {
+                "id": "r1",
+                "name": "run1",
+                "run_type": "chain",
+                "parent_run_id": None,
+                "status": "success",
+                # No token data
+                "extra": {},
+            },
+        ]
+        summary = calculate_tree_summary(runs)
+
+        assert summary["total_runs"] == 1
+        assert summary["total_tokens"] == 0
+        assert summary["total_cost"] == 0
+
+    def test_calculate_summary_mixed_statuses(self):
+        """Test summary calculation with mixed success/error statuses."""
+        runs = [
+            {"id": "r1", "name": "run1", "run_type": "chain", "status": "success", "extra": {}},
+            {"id": "r2", "name": "run2", "run_type": "llm", "status": "error", "error": "Err1", "extra": {}},
+            {"id": "r3", "name": "run3", "run_type": "llm", "status": "success", "extra": {}},
+            {"id": "r4", "name": "run4", "run_type": "tool", "status": "error", "error": "Err2", "extra": {}},
+        ]
+        summary = calculate_tree_summary(runs)
+
+        assert summary["total_runs"] == 4
+        assert summary["has_errors"] is True
+        assert summary["error_count"] == 2
+        assert len(summary["error_runs"]) == 2
+
+    def test_format_tree_pretty_empty_tree(self):
+        """Test pretty formatting with None tree."""
+        summary = {
+            "total_runs": 0,
+            "total_tokens": 0,
+            "total_cost": 0,
+            "total_duration_ms": None,
+            "has_errors": False,
+            "error_count": 0,
+            "run_types": {},
+            "models_used": [],
+            "error_runs": [],
+        }
+        formatted = format_tree_pretty(None, summary)
+
+        assert "TRACE SUMMARY" in formatted
+        assert "No tree structure" in formatted or "Total runs: 0" in formatted
