@@ -968,11 +968,12 @@ def fetch_trace_tree(
     headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
     url = f"{base_url}/runs/query"
 
-    # Build request body
+    # Build request body - API limits to 100 per request, use pagination for more
+    per_page = min(100, max_runs)
     body = {
-        "trace_id": trace_id,
+        "trace": trace_id,
         "select": TREE_SELECT_FIELDS,
-        "limit": max_runs,
+        "limit": per_page,
     }
 
     all_runs = []

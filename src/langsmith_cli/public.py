@@ -6,7 +6,6 @@ from urllib.parse import urlparse
 
 import requests
 
-from .fetchers import TREE_SELECT_FIELDS
 from .tree import build_tree_from_runs, calculate_tree_summary, extract_run_summary
 
 
@@ -139,17 +138,98 @@ def _is_uuid_like(s: str) -> bool:
     return bool(re.match(uuid_pattern, s, re.IGNORECASE))
 
 
+def _fetch_public_runs_batch(
+    share_token: str,
+    base_url: str,
+    max_runs: int = 1000,
+) -> list[dict]:
+    """
+    Fetch all runs from a public trace using batch requests.
+
+    Uses the id filter in /runs/query to fetch multiple runs per request,
+    which is much more efficient than fetching one at a time.
+    """
+    headers = {"Content-Type": "application/json"}
+    all_runs: list[dict] = []
+    visited: set[str] = set()
+    to_fetch: list[str] = []
+
+    # Fetch the root run first
+    root_url = f"{base_url}/public/{share_token}/run"
+    response = requests.get(root_url, headers=headers, timeout=30)
+
+    if response.status_code == 403:
+        raise ValueError(
+            "Trace is not publicly shared. "
+            "Set LANGSMITH_API_KEY for authenticated access."
+        )
+    if response.status_code == 404:
+        raise ValueError(f"Public trace not found: {share_token}")
+
+    response.raise_for_status()
+    root = response.json()
+
+    root_id = root.get("id")
+    visited.add(root_id)
+    all_runs.append(root)
+
+    # Queue all child IDs for batch fetching
+    to_fetch = list(root.get("child_run_ids") or [])
+
+    # Batch fetch children level by level
+    query_url = f"{base_url}/public/{share_token}/runs/query"
+
+    while to_fetch and len(all_runs) < max_runs:
+        # Take up to 100 IDs per batch (API limit)
+        batch = to_fetch[:100]
+        to_fetch = to_fetch[100:]
+
+        # Skip already visited IDs
+        batch = [rid for rid in batch if rid not in visited]
+        if not batch:
+            continue
+
+        body = {"id": batch, "limit": 100}
+        response = requests.post(query_url, headers=headers, json=body, timeout=30)
+
+        if response.status_code != 200:
+            # If batch fetch fails, skip this batch
+            continue
+
+        data = response.json()
+        runs = data.get("runs", [])
+
+        for run in runs:
+            run_id = run.get("id")
+            if run_id not in visited:
+                visited.add(run_id)
+                all_runs.append(run)
+
+                # Queue this run's children
+                child_ids = run.get("child_run_ids") or []
+                for cid in child_ids:
+                    if cid not in visited and cid not in to_fetch:
+                        to_fetch.append(cid)
+
+            if len(all_runs) >= max_runs:
+                break
+
+    return all_runs
+
+
 def fetch_public_trace_tree(
     url_or_trace_id: str,
     *,
     base_url: str = "https://api.smith.langchain.com",
+    max_runs: int = 1000,
 ) -> dict[str, Any]:
     """
     Fetch trace tree from a public share URL (no auth required).
 
     Args:
-        url_or_trace_id: Public URL or trace ID
+        url_or_trace_id: Public URL or share token
         base_url: API base URL (default: production LangSmith)
+        max_runs: Maximum runs to fetch (default 1000)
 
     Returns:
         Same structure as fetch_trace_tree():
@@ -167,6 +247,10 @@ def fetch_public_trace_tree(
     Raises:
         ValueError: If trace is not publicly shared
         requests.HTTPError: If API request fails
+
+    Note:
+        The public API requires fetching each run individually and
+        recursively traversing child_run_ids to build the full tree.
     """
     from datetime import datetime, timezone
 
@@ -178,57 +262,15 @@ def fetch_public_trace_tree(
                 "URL does not appear to be a public share link. "
                 "Use LANGSMITH_API_KEY for non-public traces."
             )
-        trace_id = parsed["trace_id"]
-        org_slug = parsed.get("org_slug")
+        share_token = parsed["trace_id"]
     else:
-        trace_id = url_or_trace_id
-        org_slug = None
+        share_token = url_or_trace_id
 
-    # Try public API endpoint
-    # The public endpoint structure varies - try different approaches
-    headers = {"Content-Type": "application/json"}
-
-    # Approach 1: Try the public share endpoint
-    # POST /public/{share_token}/runs/query
-    if org_slug:
-        url = f"{base_url}/public/{org_slug}/{trace_id}/runs/query"
-    else:
-        url = f"{base_url}/public/{trace_id}/runs/query"
-
-    body = {
-        "trace_id": trace_id,
-        "select": TREE_SELECT_FIELDS,
-        "limit": 1000,
-    }
-
-    response = requests.post(url, headers=headers, json=body, timeout=30)
-
-    # If the first approach fails, try alternative endpoints
-    if response.status_code == 404:
-        # Approach 2: Try querying by share token directly
-        url = f"{base_url}/public/{trace_id}/runs"
-        response = requests.get(url, headers=headers, timeout=30)
-
-    if response.status_code == 403:
-        raise ValueError(
-            "Trace is not publicly shared. "
-            "Set LANGSMITH_API_KEY for authenticated access."
-        )
-    if response.status_code == 404:
-        raise ValueError(f"Public trace not found: {trace_id}")
-
-    response.raise_for_status()
-
-    data = response.json()
-
-    # Handle different response formats
-    if isinstance(data, list):
-        all_runs = data
-    else:
-        all_runs = data.get("runs", [])
+    # Fetch all runs using batch requests
+    all_runs = _fetch_public_runs_batch(share_token, base_url, max_runs)
 
     if not all_runs:
-        raise ValueError(f"No runs found for public trace: {trace_id}")
+        raise ValueError(f"No runs found for public trace: {share_token}")
 
     # Build tree structure
     tree = build_tree_from_runs(all_runs)
@@ -248,7 +290,7 @@ def fetch_public_trace_tree(
     fetched_at = datetime.now(timezone.utc).isoformat()
 
     return {
-        "trace_id": trace_id,
+        "trace_id": share_token,
         "fetched_at": fetched_at,
         "total_runs": len(all_runs),
         "root": root_summary,
