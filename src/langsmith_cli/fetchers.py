@@ -4,7 +4,7 @@ import json
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from time import perf_counter
-from typing import Any, Literal, overload
+from typing import Any
 
 import requests
 from rich.console import Console
@@ -407,44 +407,6 @@ def _fetch_traces_concurrent(
                 trace_data["feedback"] = feedback_map[trace_id]
 
     return results, timing_info
-
-
-_TraceData = list[dict[str, Any]] | dict[str, Any]
-_TraceList = list[tuple[str, _TraceData]]
-
-
-@overload
-def fetch_recent_traces(
-    api_key: str,
-    base_url: str,
-    limit: int = 1,
-    project_uuid: str | None = None,
-    last_n_minutes: int | None = None,
-    since: str | None = None,
-    max_workers: int = 5,
-    show_progress: bool = True,
-    *,
-    return_timing: Literal[False] = False,
-    include_metadata: bool = False,
-    include_feedback: bool = False,
-) -> _TraceList: ...
-
-
-@overload
-def fetch_recent_traces(
-    api_key: str,
-    base_url: str,
-    limit: int = 1,
-    project_uuid: str | None = None,
-    last_n_minutes: int | None = None,
-    since: str | None = None,
-    max_workers: int = 5,
-    show_progress: bool = True,
-    *,
-    return_timing: Literal[True],
-    include_metadata: bool = False,
-    include_feedback: bool = False,
-) -> tuple[_TraceList, dict[str, float]]: ...
 
 
 def fetch_recent_traces(
