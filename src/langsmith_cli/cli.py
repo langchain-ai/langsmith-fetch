@@ -12,29 +12,14 @@ from . import config, fetchers, formatters
 
 
 def sanitize_filename(filename: str) -> str:
-    """Sanitize a string to be used as a safe filename.
-
-    Removes or replaces characters that are not safe for filenames across platforms.
-
-    Args:
-        filename: The original filename string
-
-    Returns:
-        A sanitized filename safe for all platforms
-    """
-    # Remove or replace unsafe characters
-    # Keep alphanumeric, hyphens, underscores, and dots
-    safe_name = re.sub(r"[^\w\-.]", "_", filename)
-    # Remove leading/trailing dots and spaces
-    safe_name = safe_name.strip(". ")
-    # Limit length to 255 characters (filesystem limit)
-    if len(safe_name) > 255:
-        safe_name = safe_name[:255]
-    return safe_name
+    """Sanitize a string to be a safe filename."""
+    safe_name = re.sub(r"[^\w\-.]", "_", filename).strip(".")
+    return safe_name[:255]
 
 
 @click.group()
-def main():
+@click.option("-v", "--verbose", is_flag=True, help="Enable verbose logging")
+def main(verbose: bool):
     """LangSmith Fetch - Fetch and display LangSmith threads and traces.
 
     This CLI tool retrieves conversation messages, traces, and threads from LangSmith.
@@ -93,7 +78,9 @@ def main():
       langsmith-fetch trace <trace-id>
       langsmith-fetch thread <thread-id>
     """
-    pass
+    from .logging import setup_logging
+
+    setup_logging(verbose)
 
 
 @main.command()
@@ -115,7 +102,26 @@ def main():
     metavar="PATH",
     help="Save output to file instead of printing to stdout",
 )
-def thread(thread_id, project_uuid, format_type, output_file):
+@click.option(
+    "--include-metadata",
+    is_flag=True,
+    default=False,
+    help="Include run metadata (status, timing, tokens, costs) in output",
+)
+@click.option(
+    "--include-feedback",
+    is_flag=True,
+    default=False,
+    help="Include feedback data in output (requires extra API call)",
+)
+def thread(
+    thread_id,
+    project_uuid,
+    format_type,
+    output_file,
+    include_metadata,
+    include_feedback,
+):
     """Fetch messages for a LangGraph thread by thread_id.
 
     A thread represents a conversation or session containing multiple traces. Each
@@ -129,14 +135,18 @@ def thread(thread_id, project_uuid, format_type, output_file):
     \b
     RETURNS:
       List of all messages from all traces in the thread, ordered chronologically.
+      With --include-metadata: Dictionary with messages, metadata, and feedback.
 
     \b
     EXAMPLES:
-      # Fetch thread with project UUID from config
+      # Fetch thread messages only (default)
       langsmith-fetch thread test-email-agent-thread
 
-      # Fetch thread with explicit project UUID
-      langsmith-fetch thread my-thread --project-uuid 80f1ecb3-a16b-411e-97ae-1c89adbb5c49
+      # Fetch thread with metadata (status, timing, tokens, costs)
+      langsmith-fetch thread test-email-agent-thread --include-metadata
+
+      # Fetch thread with both metadata and feedback
+      langsmith-fetch thread test-email-agent-thread --include-metadata --include-feedback
 
       # Fetch thread as JSON for parsing
       langsmith-fetch thread test-email-agent-thread --format json
@@ -181,13 +191,20 @@ def thread(thread_id, project_uuid, format_type, output_file):
         format_type = config.get_default_format()
 
     try:
-        # Fetch thread with metadata and feedback
-        thread_data = fetchers.fetch_thread_with_metadata(
-            thread_id, project_uuid, base_url=base_url, api_key=api_key
-        )
-
-        # Output with metadata and feedback
-        formatters.print_formatted_trace(thread_data, format_type, output_file)
+        if include_metadata or include_feedback:
+            thread_data = fetchers.fetch_thread_with_metadata(
+                thread_id,
+                project_uuid,
+                base_url=base_url,
+                api_key=api_key,
+                include_feedback=include_feedback,
+            )
+            formatters.print_formatted_trace(thread_data, format_type, output_file)
+        else:
+            messages = fetchers.fetch_thread(
+                thread_id, project_uuid, base_url=base_url, api_key=api_key
+            )
+            formatters.print_formatted(messages, format_type, output_file)
 
     except Exception as e:
         click.echo(f"Error fetching thread: {e}", err=True)
@@ -282,7 +299,9 @@ def trace(trace_id, format_type, output_file, include_metadata, include_feedback
             formatters.print_formatted_trace(trace_data, format_type, output_file)
         else:
             # Fetch messages only (no metadata/feedback)
-            messages = fetchers.fetch_trace(trace_id, base_url=base_url, api_key=api_key)
+            messages = fetchers.fetch_trace(
+                trace_id, base_url=base_url, api_key=api_key
+            )
             # Output just messages
             formatters.print_formatted(messages, format_type, output_file)
 
@@ -393,9 +412,6 @@ def threads(
       - LANGSMITH_API_KEY environment variable or stored in config
       - Project UUID (required, via config or --project-uuid flag)
     """
-    from rich.console import Console
-
-    console = Console()
 
     # Validate mutually exclusive options
     if last_n_minutes is not None and since is not None:
@@ -862,7 +878,9 @@ def traces(
             if limit == 1 and len(traces_data) == 1:
                 trace_id, trace_data = traces_data[0]
                 if output_file:
-                    formatters.print_formatted_trace(trace_data, format_type, output_file)
+                    formatters.print_formatted_trace(
+                        trace_data, format_type, output_file
+                    )
                     click.echo(f"Saved trace to {output_file}")
                 else:
                     formatters.print_formatted_trace(trace_data, format_type, None)

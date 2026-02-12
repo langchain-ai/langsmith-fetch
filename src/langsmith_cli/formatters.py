@@ -98,7 +98,7 @@ def _format_pretty(messages: list[dict[str, Any]]) -> str:
 
 
 def print_formatted(
-    messages: list[dict[str, Any]], format_type: str, output_file: str = None
+    messages: list[dict[str, Any]], format_type: str, output_file: str | None = None
 ):
     """
     Print formatted messages directly to console with Rich formatting, or save to file.
@@ -172,7 +172,9 @@ def print_formatted(
 # ============================================================================
 
 
-def format_trace_data(data: dict[str, Any] | list[dict[str, Any]], format_type: str) -> str:
+def format_trace_data(
+    data: dict[str, Any] | list[dict[str, Any]], format_type: str
+) -> str:
     """Format trace data with optional metadata and feedback.
 
     Args:
@@ -295,7 +297,7 @@ def _format_feedback_section(feedback: list[dict[str, Any]]) -> str:
         if fb.get("comment"):
             lines.append(f"  Comment: {fb['comment']}")
         if fb.get("correction"):
-            correction = fb['correction']
+            correction = fb["correction"]
             if isinstance(correction, str):
                 lines.append(f"  Correction: {correction}")
             else:

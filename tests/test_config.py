@@ -195,7 +195,7 @@ class TestProjectLookup:
 
     def test_lookup_project_uuid_success(self, temp_config_dir, monkeypatch):
         """Test successful project lookup via API."""
-        from unittest.mock import Mock, MagicMock
+        from unittest.mock import MagicMock, Mock
 
         monkeypatch.setenv("LANGSMITH_PROJECT", "test-project")
         monkeypatch.setenv("LANGSMITH_API_KEY", TEST_API_KEY)
@@ -238,7 +238,7 @@ class TestProjectLookup:
 
     def test_lookup_caching(self, temp_config_dir, monkeypatch):
         """Test that lookup result is cached for session."""
-        from unittest.mock import Mock, MagicMock
+        from unittest.mock import MagicMock, Mock
 
         monkeypatch.setenv("LANGSMITH_PROJECT", "cached-project")
         monkeypatch.setenv("LANGSMITH_API_KEY", TEST_API_KEY)
@@ -253,7 +253,10 @@ class TestProjectLookup:
         with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
             with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
                 with patch("langsmith.Client", return_value=mock_client):
-                    from langsmith_cli.config import get_project_uuid, _project_uuid_cache
+                    from langsmith_cli.config import (
+                        _project_uuid_cache,
+                        get_project_uuid,
+                    )
 
                     # Clear cache first
                     _project_uuid_cache.clear()
@@ -283,7 +286,7 @@ class TestProjectLookup:
 
     def test_project_name_change_triggers_refetch(self, temp_config_dir, monkeypatch):
         """Test that changing project name triggers UUID re-fetch."""
-        from unittest.mock import Mock, MagicMock
+        from unittest.mock import MagicMock, Mock
 
         monkeypatch.setenv("LANGSMITH_PROJECT", "new-project")
         monkeypatch.setenv("LANGSMITH_API_KEY", TEST_API_KEY)
@@ -298,7 +301,12 @@ class TestProjectLookup:
         with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
             with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
                 with patch("langsmith.Client", return_value=mock_client):
-                    from langsmith_cli.config import get_project_uuid, set_config_value, get_config_value, _project_uuid_cache
+                    from langsmith_cli.config import (
+                        _project_uuid_cache,
+                        get_config_value,
+                        get_project_uuid,
+                        set_config_value,
+                    )
 
                     # Clear cache
                     _project_uuid_cache.clear()
@@ -328,7 +336,11 @@ class TestProjectLookup:
         with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
             with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
                 with patch("langsmith.Client", return_value=mock_client):
-                    from langsmith_cli.config import get_project_uuid, set_config_value, _project_uuid_cache
+                    from langsmith_cli.config import (
+                        _project_uuid_cache,
+                        get_project_uuid,
+                        set_config_value,
+                    )
 
                     # Clear cache
                     _project_uuid_cache.clear()
@@ -344,7 +356,7 @@ class TestProjectLookup:
 
     def test_legacy_config_migration(self, temp_config_dir, monkeypatch):
         """Test that legacy config (only project_uuid) triggers re-fetch and migration."""
-        from unittest.mock import Mock, MagicMock
+        from unittest.mock import MagicMock, Mock
 
         monkeypatch.setenv("LANGSMITH_PROJECT", "test-project")
         monkeypatch.setenv("LANGSMITH_API_KEY", TEST_API_KEY)
@@ -359,7 +371,12 @@ class TestProjectLookup:
         with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
             with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
                 with patch("langsmith.Client", return_value=mock_client):
-                    from langsmith_cli.config import get_project_uuid, set_config_value, get_config_value, _project_uuid_cache
+                    from langsmith_cli.config import (
+                        _project_uuid_cache,
+                        get_config_value,
+                        get_project_uuid,
+                        set_config_value,
+                    )
 
                     # Clear cache
                     _project_uuid_cache.clear()
@@ -422,7 +439,12 @@ class TestProjectLookup:
         with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
             with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
                 with patch("langsmith.Client", return_value=mock_client):
-                    from langsmith_cli.config import get_project_uuid, get_config_value, set_config_value, _project_uuid_cache
+                    from langsmith_cli.config import (
+                        _project_uuid_cache,
+                        get_config_value,
+                        get_project_uuid,
+                        set_config_value,
+                    )
 
                     # Clear cache
                     _project_uuid_cache.clear()
@@ -443,7 +465,7 @@ class TestProjectLookup:
         """Test that in-memory cache clears when project_uuid is manually set."""
         with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
             with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
-                from langsmith_cli.config import set_config_value, _project_uuid_cache
+                from langsmith_cli.config import _project_uuid_cache, set_config_value
 
                 # Populate cache
                 _project_uuid_cache["test-project"] = "cached-uuid"
@@ -460,7 +482,12 @@ class TestProjectLookup:
 
         with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
             with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
-                from langsmith_cli.config import get_project_uuid, set_config_value, get_config_value, _project_uuid_cache
+                from langsmith_cli.config import (
+                    _project_uuid_cache,
+                    get_config_value,
+                    get_project_uuid,
+                    set_config_value,
+                )
 
                 # Set old config
                 set_config_value("project-name", "old-project")
@@ -494,7 +521,7 @@ class TestProjectLookup:
 
     def test_project_uuid_persists_after_lookup(self, temp_config_dir, monkeypatch):
         """Test that both project_name and project_uuid persist after lookup."""
-        from unittest.mock import Mock, MagicMock
+        from unittest.mock import MagicMock, Mock
 
         monkeypatch.setenv("LANGSMITH_PROJECT", "persist-project")
         monkeypatch.setenv("LANGSMITH_API_KEY", TEST_API_KEY)
@@ -509,7 +536,11 @@ class TestProjectLookup:
         with patch("langsmith_cli.config.CONFIG_DIR", temp_config_dir):
             with patch("langsmith_cli.config.CONFIG_FILE", temp_config_dir / "config.yaml"):
                 with patch("langsmith.Client", return_value=mock_client):
-                    from langsmith_cli.config import get_project_uuid, get_config_value, _project_uuid_cache
+                    from langsmith_cli.config import (
+                        _project_uuid_cache,
+                        get_config_value,
+                        get_project_uuid,
+                    )
 
                     # Clear cache
                     _project_uuid_cache.clear()

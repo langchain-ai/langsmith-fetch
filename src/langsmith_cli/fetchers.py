@@ -1,15 +1,22 @@
 """Core fetching logic for LangSmith threads and traces."""
 
 import json
-import sys
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from time import perf_counter
-from typing import Any
+from typing import Any, Literal, overload
 
 import requests
 from rich.console import Console
-from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+)
+
+from .logging import logger
 
 try:
     from langsmith import Client  # noqa: F401
@@ -19,9 +26,7 @@ except ImportError:
     HAS_LANGSMITH = False
 
 
-def fetch_thread(
-    thread_id: str, project_uuid: str, *, base_url: str, api_key: str
-) -> list[dict[str, Any]]:
+def fetch_thread(thread_id: str, project_uuid: str, *, base_url: str, api_key: str) -> list[dict[str, Any]]:
     """
     Fetch messages for a LangGraph thread by thread_id.
 
@@ -138,13 +143,11 @@ def fetch_recent_threads(
 
     response = requests.post(url, headers=headers, data=json.dumps(body))
 
-    # Add better error handling
     try:
         response.raise_for_status()
     except requests.HTTPError:
-        # Print response content for debugging
-        print(f"API Error Response ({response.status_code}): {response.text}")
-        print(f"Request body was: {json.dumps(body, indent=2)}")
+        logger.debug(f"API Error Response ({response.status_code}): {response.text}")
+        logger.debug(f"Request body was: {json.dumps(body, indent=2)}")
         raise
 
     data = response.json()
@@ -168,30 +171,20 @@ def fetch_recent_threads(
             if len(thread_info) >= limit:
                 break
 
-    # Fetch messages for each thread with concurrent fetching and progress bar
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
-    import sys
-
     def _fetch_thread_safe(thread_id: str) -> tuple[str, list[dict[str, Any]] | None]:
         """Safe wrapper for fetch_thread that returns (thread_id, messages or None)."""
         try:
-            messages = fetch_thread(
-                thread_id, project_uuid, base_url=base_url, api_key=api_key
-            )
+            messages = fetch_thread(thread_id, project_uuid, base_url=base_url, api_key=api_key)
             return (thread_id, messages)
         except Exception as e:
-            print(f"Warning: Failed to fetch thread {thread_id}: {e}", file=sys.stderr)
+            logger.warning(f"Failed to fetch thread {thread_id}: {e}")
             return (thread_id, None)
 
     results = []
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit all fetch tasks
-        future_to_thread = {
-            executor.submit(_fetch_thread_safe, thread_id): thread_id
-            for thread_id in thread_info.keys()
-        }
+        future_to_thread = {executor.submit(_fetch_thread_safe, thread_id): thread_id for thread_id in thread_info.keys()}
 
         # Use progress bar if requested
         if show_progress:
@@ -288,9 +281,7 @@ def fetch_latest_trace(
     return fetch_trace(trace_id, base_url=base_url, api_key=api_key)
 
 
-def _fetch_trace_safe(
-    trace_id: str, base_url: str, api_key: str
-) -> tuple[str, list[dict[str, Any]] | None, Exception | None]:
+def _fetch_trace_safe(trace_id: str, base_url: str, api_key: str) -> tuple[str, list[dict[str, Any]] | None, Exception | None]:
     """Fetch a single trace with error handling.
 
     Returns:
@@ -351,10 +342,7 @@ def _fetch_traces_concurrent(
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit all fetch tasks
-        future_to_trace = {
-            executor.submit(_fetch_trace_safe, str(run.id), base_url, api_key): str(run.id)
-            for run in runs
-        }
+        future_to_trace = {executor.submit(_fetch_trace_safe, str(run.id), base_url, api_key): str(run.id) for run in runs}
 
         # Setup progress bar if requested
         if show_progress:
@@ -376,11 +364,11 @@ def _fetch_traces_concurrent(
             trace_id, messages, error = future.result()
 
             if error:
-                msg = f"Warning: Failed to fetch trace {trace_id}: {error}"
+                msg = f"Failed to fetch trace {trace_id}: {error}"
                 if show_progress:
                     progress.console.print(f"[yellow]{msg}[/yellow]")
                 else:
-                    print(msg, file=sys.stderr)
+                    logger.warning(msg)
                 timing_info["traces_failed"] += 1
             else:
                 if include_metadata:
@@ -405,9 +393,7 @@ def _fetch_traces_concurrent(
     timing_info["fetch_duration"] = perf_counter() - timing_info["fetch_start"]
     timing_info["individual_timings"] = individual_timings
     if timing_info["traces_succeeded"] > 0:
-        timing_info["avg_per_trace"] = (
-            timing_info["fetch_duration"] / timing_info["traces_succeeded"]
-        )
+        timing_info["avg_per_trace"] = timing_info["fetch_duration"] / timing_info["traces_succeeded"]
 
     # Batch fetch feedback for all runs that have it
     if include_metadata and include_feedback and runs_with_feedback:
@@ -416,11 +402,49 @@ def _fetch_traces_concurrent(
         timing_info["feedback_duration"] = perf_counter() - feedback_start
 
         # Add feedback to corresponding traces
-        for idx, (trace_id, trace_data) in enumerate(results):
+        for _, (trace_id, trace_data) in enumerate(results):
             if trace_id in feedback_map:
                 trace_data["feedback"] = feedback_map[trace_id]
 
     return results, timing_info
+
+
+_TraceData = list[dict[str, Any]] | dict[str, Any]
+_TraceList = list[tuple[str, _TraceData]]
+
+
+@overload
+def fetch_recent_traces(
+    api_key: str,
+    base_url: str,
+    limit: int = 1,
+    project_uuid: str | None = None,
+    last_n_minutes: int | None = None,
+    since: str | None = None,
+    max_workers: int = 5,
+    show_progress: bool = True,
+    *,
+    return_timing: Literal[False] = False,
+    include_metadata: bool = False,
+    include_feedback: bool = False,
+) -> _TraceList: ...
+
+
+@overload
+def fetch_recent_traces(
+    api_key: str,
+    base_url: str,
+    limit: int = 1,
+    project_uuid: str | None = None,
+    last_n_minutes: int | None = None,
+    since: str | None = None,
+    max_workers: int = 5,
+    show_progress: bool = True,
+    *,
+    return_timing: Literal[True],
+    include_metadata: bool = False,
+    include_feedback: bool = False,
+) -> tuple[_TraceList, dict[str, float]]: ...
 
 
 def fetch_recent_traces(
@@ -485,10 +509,7 @@ def fetch_recent_traces(
         ...     print(f"  Feedback: {len(trace_data['feedback'])} items")
     """
     if not HAS_LANGSMITH:
-        raise Exception(
-            "langsmith package required for fetching multiple traces. "
-            "Install with: pip install langsmith"
-        )
+        raise Exception("langsmith package required for fetching multiple traces. Install with: pip install langsmith")
 
     from datetime import datetime, timedelta, timezone
 
@@ -536,9 +557,7 @@ def fetch_recent_traces(
     )
 
     if not results:
-        raise ValueError(
-            f"Successfully queried {len(runs)} traces but failed to fetch messages for all of them"
-        )
+        raise ValueError(f"Successfully queried {len(runs)} traces but failed to fetch messages for all of them")
 
     # Add list_runs timing to timing info
     timing_info["list_runs_duration"] = list_duration
@@ -658,10 +677,7 @@ def _has_feedback(metadata: dict) -> bool:
         return False
 
     # Check if any feedback count is positive
-    return any(
-        isinstance(v, (int, float)) and v > 0
-        for v in feedback_stats.values()
-    )
+    return any(isinstance(v, (int, float)) and v > 0 for v in feedback_stats.values())
 
 
 def _sdk_run_has_feedback(run) -> bool:
@@ -677,10 +693,7 @@ def _sdk_run_has_feedback(run) -> bool:
     if not feedback_stats:
         return False
 
-    return any(
-        isinstance(v, (int, float)) and v > 0
-        for v in feedback_stats.values()
-    )
+    return any(isinstance(v, (int, float)) and v > 0 for v in feedback_stats.values())
 
 
 def _serialize_feedback(fb) -> dict[str, Any]:
@@ -723,7 +736,7 @@ def _fetch_feedback(run_id: str, *, api_key: str) -> list[dict[str, Any]]:
         feedback_list = list(client.list_feedback(run_id=run_id))
         return [_serialize_feedback(fb) for fb in feedback_list]
     except Exception as e:
-        print(f"Warning: Failed to fetch feedback for run {run_id}: {e}", file=sys.stderr)
+        logger.warning(f"Failed to fetch feedback for run {run_id}: {e}")
         return []
 
 
@@ -855,34 +868,29 @@ def fetch_thread_with_metadata(
     metadata = {}
     feedback = []
 
-    if HAS_LANGSMITH:
-        try:
-            from langsmith import Client
+    headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
+    url = f"{base_url}/runs/query"
+    body = {
+        "session": [project_uuid],
+        "is_root": True,
+        "filter": f'eq(thread_id, "{thread_id}")',
+        "limit": 1,
+    }
 
-            client = Client(api_key=api_key)
+    try:
+        response = requests.post(url, headers=headers, data=json.dumps(body))
+        response.raise_for_status()
+        data = response.json()
+        runs = data.get("runs", [])
 
-            # Query for root runs with this thread_id (most recent first)
-            runs = list(
-                client.list_runs(
-                    project_id=project_uuid,
-                    filter=f'and(eq(is_root, true), eq(extra.metadata.thread_id, "{thread_id}"))',
-                    limit=1,
-                )
-            )
+        if runs:
+            root_run = runs[0]
+            metadata = _extract_run_metadata(root_run)
+            if include_feedback and _has_feedback(metadata):
+                feedback = _fetch_feedback(root_run["id"], api_key=api_key)
 
-            if runs:
-                root_run = runs[0]
-                metadata = _extract_run_metadata_from_sdk_run(root_run)
-
-                # Fetch feedback if requested and feedback exists
-                if include_feedback and _sdk_run_has_feedback(root_run):
-                    feedback = _fetch_feedback(str(root_run.id), api_key=api_key)
-
-        except Exception as e:
-            print(
-                f"Warning: Failed to fetch metadata for thread {thread_id}: {e}",
-                file=sys.stderr,
-            )
+    except Exception:
+        pass
 
     return {
         "thread_id": thread_id,
