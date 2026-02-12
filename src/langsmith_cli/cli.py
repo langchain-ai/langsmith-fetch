@@ -8,7 +8,8 @@ from pathlib import Path
 
 import click
 
-from . import config, fetchers, formatters, logging
+from . import config, fetchers, formatters
+from .logging import setup_logging
 
 
 def sanitize_filename(filename: str) -> str:
@@ -78,7 +79,7 @@ def main(verbose: bool):
       langsmith-fetch trace <trace-id>
       langsmith-fetch thread <thread-id>
     """
-    logging.setup_logging(verbose)
+    setup_logging(verbose)
 
 
 @main.command()
@@ -777,10 +778,6 @@ def traces(
       - LANGSMITH_API_KEY environment variable or stored in config
       - Optional: Project UUID for filtering (recommended)
     """
-    from rich.console import Console
-
-    console = Console()
-
     # Validate mutually exclusive options
     if last_n_minutes is not None and since is not None:
         click.echo(
@@ -980,7 +977,7 @@ def traces(
                         syntax = Syntax(
                             json_str, "json", theme="monokai", line_numbers=False
                         )
-                        console.print(syntax)
+                        formatters.console.print(syntax)
                     else:  # pretty
                         for trace_id, trace_data in traces_data:
                             click.echo(f"\n{'=' * 60}")

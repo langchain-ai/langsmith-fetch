@@ -20,7 +20,7 @@ from rich.progress import (
 from .logging import logger
 
 try:
-    from langsmith import Client  # noqa: F401
+    import langsmith  # noqa: F401
 
     HAS_LANGSMITH = True
 except ImportError:
@@ -308,84 +308,20 @@ def fetch_recent_threads(
     return results
 
 
-def fetch_latest_trace(
-    api_key: str,
-    base_url: str,
-    project_uuid: str | None = None,
-    last_n_minutes: int | None = None,
-    since: str | None = None,
-) -> list[dict[str, Any]]:
-    """
-    Fetch the most recent root trace from LangSmith.
-
-    Uses the LangSmith SDK to list runs and find the latest trace, then
-    fetches the full messages using the existing fetch_trace function.
-
-    Args:
-        api_key: LangSmith API key
-        base_url: LangSmith base URL
-        project_uuid: Optional project UUID to filter traces (if None, searches all projects)
-        last_n_minutes: Optional time window in minutes to limit search
-        since: Optional ISO timestamp string to limit search (e.g., '2025-12-09T10:00:00Z')
-
-    Returns:
-        List of message dictionaries from the latest trace
-
-    Raises:
-        ValueError: If no traces found matching criteria
-        Exception: If API request fails
-    """
-
-    from langsmith import Client
-
-    # Initialize langsmith client
-    client = Client(api_key=api_key)
-
-    # Build filter parameters
-    filter_params = {
-        "filter": 'and(eq(is_root, true), neq(status, "pending"))',
-        "limit": 1,
-    }
-
-    # Add project filter if provided
-    if project_uuid is not None:
-        filter_params["project_id"] = project_uuid
-
-    # Add time filtering if specified
-    if last_n_minutes is not None:
-        start_time = datetime.now(timezone.utc) - timedelta(minutes=last_n_minutes)
-        filter_params["start_time"] = start_time
-    elif since is not None:
-        # Parse ISO timestamp
-        start_time = datetime.fromisoformat(since.replace("Z", "+00:00"))
-        filter_params["start_time"] = start_time
-
-    # Fetch latest run
-    runs = list(client.list_runs(**filter_params))
-
-    if not runs:
-        raise ValueError("No traces found matching criteria")
-
-    latest_run = runs[0]
-    trace_id = str(latest_run.id)
-
-    # Reuse existing fetch_trace to get full messages
-    return fetch_trace(trace_id, base_url=base_url, api_key=api_key)
-
-
 def _fetch_trace_safe(
     trace_id: str, base_url: str, api_key: str
-) -> tuple[str, list[dict[str, Any]] | None, Exception | None]:
-    """Fetch a single trace with error handling.
+) -> tuple[str, list[dict[str, Any]] | None, Exception | None, float]:
+    """Fetch a single trace with error handling and timing.
 
     Returns:
-        Tuple of (trace_id, messages or None, error or None)
+        Tuple of (trace_id, messages or None, error or None, duration_seconds)
     """
+    start = perf_counter()
     try:
         messages = fetch_trace(trace_id, base_url=base_url, api_key=api_key)
-        return (trace_id, messages, None)
+        return (trace_id, messages, None, perf_counter() - start)
     except Exception as e:
-        return (trace_id, None, e)
+        return (trace_id, None, e, perf_counter() - start)
 
 
 def _fetch_traces_concurrent(
@@ -427,8 +363,9 @@ def _fetch_traces_concurrent(
     if include_metadata:
         for run in runs:
             trace_id = str(run.id)
-            run_metadata_map[trace_id] = _extract_run_metadata_from_sdk_run(run)
-            if include_feedback and _sdk_run_has_feedback(run):
+            metadata = _extract_run_metadata(run)
+            run_metadata_map[trace_id] = metadata
+            if include_feedback and _has_feedback(metadata):
                 runs_with_feedback.append(trace_id)
 
     # Concurrent fetching with progress (for all traces, including single)
@@ -460,7 +397,15 @@ def _fetch_traces_concurrent(
 
         # Collect results as they complete
         for future in as_completed(future_to_trace):
-            trace_id, messages, error = future.result()
+            trace_id, messages, error, duration = future.result()
+
+            individual_timings.append(
+                {
+                    "trace_id": trace_id,
+                    "duration": duration,
+                    "success": error is None,
+                }
+            )
 
             if error:
                 msg = f"Failed to fetch trace {trace_id}: {error}"
@@ -503,7 +448,7 @@ def _fetch_traces_concurrent(
         timing_info["feedback_duration"] = perf_counter() - feedback_start
 
         # Add feedback to corresponding traces
-        for _, (trace_id, trace_data) in enumerate(results):
+        for trace_id, trace_data in results:
             if trace_id in feedback_map:
                 trace_data["feedback"] = feedback_map[trace_id]
 
@@ -641,101 +586,66 @@ def fetch_recent_traces(
 # ============================================================================
 
 
-def _extract_run_metadata(run_data: dict) -> dict[str, Any]:
-    """Extract metadata from a Run object (REST API response).
+def _extract_run_metadata(run_data) -> dict[str, Any]:
+    """Extract metadata from a run (REST API dict or SDK Run object).
 
     Args:
-        run_data: Run object dict from REST API response
+        run_data: Run data dict from REST API response, or SDK Run object
 
     Returns:
         Dictionary with extracted metadata fields
     """
+    is_dict = isinstance(run_data, dict)
 
-    extra = run_data.get("extra") or {}
-    custom_metadata = extra.get("metadata") or {}
+    def _get(key, default=None):
+        return (
+            run_data.get(key, default) if is_dict else getattr(run_data, key, default)
+        )
 
-    # Calculate duration if we have both start and end times
+    extra = _get("extra") or {}
+    custom_metadata = (extra.get("metadata") if isinstance(extra, dict) else {}) or {}
+
+    start_time = _get("start_time")
+    end_time = _get("end_time")
+
+    # Calculate duration
     duration_ms = None
-    start_time = run_data.get("start_time")
-    end_time = run_data.get("end_time")
     if start_time and end_time:
         try:
-            start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
-            end_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+            if isinstance(start_time, str):
+                start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+                end_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+            else:
+                start_dt = start_time
+                end_dt = end_time
             duration_ms = int((end_dt - start_dt).total_seconds() * 1000)
-        except (ValueError, AttributeError):
+        except (ValueError, AttributeError, TypeError):
             pass
 
+    # Normalize timestamps to ISO strings
+    def _to_iso(val):
+        if val is None:
+            return None
+        return val.isoformat() if not isinstance(val, str) else val
+
     return {
-        "status": run_data.get("status"),
-        "start_time": start_time,
-        "end_time": end_time,
+        "status": _get("status"),
+        "start_time": _to_iso(start_time),
+        "end_time": _to_iso(end_time),
         "duration_ms": duration_ms,
         "custom_metadata": custom_metadata,
         "token_usage": {
-            "prompt_tokens": run_data.get("prompt_tokens"),
-            "completion_tokens": run_data.get("completion_tokens"),
-            "total_tokens": run_data.get("total_tokens"),
+            "prompt_tokens": _get("prompt_tokens"),
+            "completion_tokens": _get("completion_tokens"),
+            "total_tokens": _get("total_tokens"),
         },
         "costs": {
-            "prompt_cost": run_data.get("prompt_cost"),
-            "completion_cost": run_data.get("completion_cost"),
-            "total_cost": run_data.get("total_cost"),
+            "prompt_cost": _get("prompt_cost"),
+            "completion_cost": _get("completion_cost"),
+            "total_cost": _get("total_cost"),
         },
-        "first_token_time": run_data.get("first_token_time"),
-        "feedback_stats": run_data.get("feedback_stats") or {},
-    }
-
-
-def _extract_run_metadata_from_sdk_run(run) -> dict[str, Any]:
-    """Extract metadata from an SDK Run object.
-
-    Args:
-        run: Run object from langsmith SDK
-
-    Returns:
-        Dictionary with extracted metadata fields
-    """
-    # Calculate duration if we have both start and end times
-    duration_ms = None
-    if (
-        hasattr(run, "start_time")
-        and hasattr(run, "end_time")
-        and run.start_time
-        and run.end_time
-    ):
-        try:
-            duration_ms = int((run.end_time - run.start_time).total_seconds() * 1000)
-        except (AttributeError, TypeError):
-            pass
-
-    # Extract custom metadata from extra field
-    custom_metadata = {}
-    if hasattr(run, "extra") and run.extra:
-        custom_metadata = run.extra.get("metadata") or {}
-
-    return {
-        "status": getattr(run, "status", None),
-        "start_time": run.start_time.isoformat()
-        if hasattr(run, "start_time") and run.start_time
-        else None,
-        "end_time": run.end_time.isoformat()
-        if hasattr(run, "end_time") and run.end_time
-        else None,
-        "duration_ms": duration_ms,
-        "custom_metadata": custom_metadata,
-        "token_usage": {
-            "prompt_tokens": getattr(run, "prompt_tokens", None),
-            "completion_tokens": getattr(run, "completion_tokens", None),
-            "total_tokens": getattr(run, "total_tokens", None),
-        },
-        "costs": {
-            "prompt_cost": getattr(run, "prompt_cost", None),
-            "completion_cost": getattr(run, "completion_cost", None),
-            "total_cost": getattr(run, "total_cost", None),
-        },
-        "first_token_time": getattr(run, "first_token_time", None),
-        "feedback_stats": getattr(run, "feedback_stats", None) or {},
+        "first_token_time": _to_iso(_get("first_token_time")),
+        "feedback_stats": _get("feedback_stats") or {},
     }
 
 
@@ -753,22 +663,6 @@ def _has_feedback(metadata: dict) -> bool:
         return False
 
     # Check if any feedback count is positive
-    return any(isinstance(v, (int, float)) and v > 0 for v in feedback_stats.values())
-
-
-def _sdk_run_has_feedback(run) -> bool:
-    """Check if SDK Run object has feedback.
-
-    Args:
-        run: SDK Run object
-
-    Returns:
-        True if feedback_stats shows any feedback exists
-    """
-    feedback_stats = getattr(run, "feedback_stats", None) or {}
-    if not feedback_stats:
-        return False
-
     return any(isinstance(v, (int, float)) and v > 0 for v in feedback_stats.values())
 
 
@@ -906,53 +800,6 @@ def fetch_trace_with_metadata(
         "messages": messages,
         "metadata": metadata,
         "feedback": feedback,
-    }
-
-
-def fetch_run_with_metadata(
-    run_id: str,
-    *,
-    base_url: str,
-    api_key: str,
-    include_feedback: bool = True,
-) -> dict[str, Any]:
-    """Fetch run with metadata and optional feedback.
-
-    Args:
-        run_id: LangSmith run UUID
-        base_url: LangSmith base URL
-        api_key: LangSmith API key
-        include_feedback: Whether to fetch full feedback objects (default: True)
-
-    Returns:
-        Dictionary with keys:
-            - run_id: Run UUID
-            - messages: List of message dictionaries (if available)
-            - metadata: Metadata dict with status, timing, tokens, costs, etc.
-            - feedback: List of feedback dicts (empty if no feedback or include_feedback=False)
-            - inputs: Run inputs
-            - outputs: Run outputs
-
-    Raises:
-        requests.HTTPError: If the API request fails
-    """
-    data = fetch_run(run_id, base_url=base_url, api_key=api_key)
-
-    messages = data.get("messages") or (data.get("outputs") or {}).get("messages") or []
-
-    metadata = _extract_run_metadata(data)
-
-    feedback = []
-    if include_feedback and _has_feedback(metadata):
-        feedback = _fetch_feedback(run_id, api_key=api_key)
-
-    return {
-        "run_id": run_id,
-        "messages": messages,
-        "metadata": metadata,
-        "feedback": feedback,
-        "inputs": data.get("inputs"),
-        "outputs": data.get("outputs"),
     }
 
 

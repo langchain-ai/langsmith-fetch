@@ -66,9 +66,13 @@ def _format_pretty(messages: list[dict[str, Any]]) -> str:
                     if "text" in item:
                         output_parts.append(item["text"])
                     elif "type" in item and item["type"] == "tool_use":
-                        output_parts.append(f"\nTool Call: {item.get('name', 'unknown')}")
+                        output_parts.append(
+                            f"\nTool Call: {item.get('name', 'unknown')}"
+                        )
                         if "input" in item:
-                            output_parts.append(f"Input: {json.dumps(item['input'], indent=2)}")
+                            output_parts.append(
+                                f"Input: {json.dumps(item['input'], indent=2)}"
+                            )
                 else:
                     output_parts.append(str(item))
         else:
@@ -93,7 +97,9 @@ def _format_pretty(messages: list[dict[str, Any]]) -> str:
     return "\n".join(output_parts)
 
 
-def print_formatted(messages: list[dict[str, Any]], format_type: str, output_file: str | None = None):
+def print_formatted(
+    messages: list[dict[str, Any]], format_type: str, output_file: str | None = None
+):
     """
     Print formatted messages directly to console with Rich formatting, or save to file.
 
@@ -132,7 +138,9 @@ def print_formatted(messages: list[dict[str, Any]], format_type: str, output_fil
                         if "text" in item:
                             parts.append(item["text"])
                         elif "type" in item and item["type"] == "tool_use":
-                            parts.append(f"[bold]Tool:[/bold] {item.get('name', 'unknown')}")
+                            parts.append(
+                                f"[bold]Tool:[/bold] {item.get('name', 'unknown')}"
+                            )
                     else:
                         parts.append(str(item))
                 panel_content = "\n".join(parts)
@@ -145,7 +153,9 @@ def print_formatted(messages: list[dict[str, Any]], format_type: str, output_fil
                 for tool_call in msg["tool_calls"]:
                     if isinstance(tool_call, dict):
                         func = tool_call.get("function", {})
-                        tool_parts.append(f"[bold]Tool:[/bold] {func.get('name', 'unknown')}")
+                        tool_parts.append(
+                            f"[bold]Tool:[/bold] {func.get('name', 'unknown')}"
+                        )
                 if tool_parts:
                     panel_content += "\n" + "\n".join(tool_parts)
 
@@ -162,7 +172,9 @@ def print_formatted(messages: list[dict[str, Any]], format_type: str, output_fil
 # ============================================================================
 
 
-def format_trace_data(data: dict[str, Any] | list[dict[str, Any]], format_type: str) -> str:
+def format_trace_data(
+    data: dict[str, Any] | list[dict[str, Any]], format_type: str
+) -> str:
     """Format trace data with optional metadata and feedback.
 
     Args:
@@ -239,7 +251,9 @@ def _format_pretty_run(data: dict[str, Any]) -> str:
         lines.append(f"End: {data['end_time']}")
 
     if data.get("total_tokens"):
-        lines.append(f"Tokens: {data['total_tokens']} (prompt: {data.get('prompt_tokens')}, completion: {data.get('completion_tokens')})")
+        lines.append(
+            f"Tokens: {data['total_tokens']} (prompt: {data.get('prompt_tokens')}, completion: {data.get('completion_tokens')})"
+        )
     if data.get("total_cost"):
         lines.append(f"Cost: ${data['total_cost']:.6f}")
 
@@ -450,7 +464,10 @@ def _extract_messages(data: dict[str, Any]) -> list[dict[str, Any]] | None:
                         elif isinstance(content, list):
                             text_parts = []
                             for item in content:
-                                if isinstance(item, dict) and item.get("type") == "text":
+                                if (
+                                    isinstance(item, dict)
+                                    and item.get("type") == "text"
+                                ):
                                     text_parts.append(item.get("text", ""))
                             if text_parts:
                                 messages.append(
@@ -490,20 +507,16 @@ def _normalize_messages(msgs: list) -> list[dict[str, Any]]:
     return normalized
 
 
-def _print_run_panel(data: dict[str, Any], include_metadata: bool = False):
-    """Print a single run as a Rich panel with nested child runs."""
-
+def _build_run_panel(data: dict[str, Any], include_metadata: bool = False) -> Panel:
+    """Build a Rich panel for a run with optional nested child runs."""
     name = data.get("name", "Unnamed")
     run_type = data.get("run_type", "unknown")
     status = data.get("status", "unknown")
+    child_runs = [
+        c for c in data.get("child_runs", []) if c.get("name") != "RunnableLambda"
+    ]
 
-    child_runs = data.get("child_runs", [])
-    child_runs = [c for c in child_runs if c.get("name") != "RunnableLambda"]
-
-    title_parts = [name]
-    if run_type:
-        title_parts.append(f"[dim]({run_type})[/dim]")
-    title = " ".join(title_parts)
+    title = f"{name} [dim]({run_type})[/dim]"
 
     renderables: list[Any] = []
 
@@ -525,17 +538,22 @@ def _print_run_panel(data: dict[str, Any], include_metadata: bool = False):
         renderables.append(f"\n[bold red]Error:[/bold red] {data['error']}")
 
     for child in child_runs:
-        renderables.append(_format_child_run_panel(child, include_metadata=include_metadata))
+        renderables.append(_build_run_panel(child, include_metadata=include_metadata))
 
-    border_style = "green" if status == "success" else "red" if status == "error" else "blue"
-    panel = Panel(
-        Group(*renderables) if len(renderables) > 1 else renderables[0] if renderables else "",
+    border_style = (
+        "green" if status == "success" else "red" if status == "error" else "blue"
+    )
+    return Panel(
+        Group(*renderables) if renderables else "",
         title=title,
         border_style=border_style,
         expand=False,
     )
 
-    console.print(panel)
+
+def _print_run_panel(data: dict[str, Any], include_metadata: bool = False):
+    """Print a run as a Rich panel."""
+    console.print(_build_run_panel(data, include_metadata=include_metadata))
 
 
 def _format_message_panel(msg: dict[str, Any]) -> Panel:
@@ -545,57 +563,17 @@ def _format_message_panel(msg: dict[str, Any]) -> Panel:
 
     lines = []
     if isinstance(content, str) and content.strip():
-        preview = content[:50] + "..." if len(content) > 50 else content
-        lines.append(preview)
+        lines.append(content)
     elif isinstance(content, list):
         for item in content:
             if isinstance(item, dict):
                 if "text" in item:
                     text = item["text"]
-                    preview = text[:50] + "..." if len(text) > 50 else text
-                    lines.append(preview)
+                    lines.append(text)
 
     return Panel(
         "\n".join(lines) if lines else "",
         title=f"[bold]{role}[/bold]",
         border_style="blue",
-        expand=False,
-    )
-
-
-def _format_child_run_panel(data: dict[str, Any], include_metadata: bool = False) -> Panel:
-    """Format a child run as a nested Rich panel."""
-
-    name = data.get("name", "Unnamed")
-    run_type = data.get("run_type", "unknown")
-    status = data.get("status", "unknown")
-
-    child_runs = data.get("child_runs", [])
-    child_runs = [c for c in child_runs if c.get("name") != "RunnableLambda"]
-
-    title = f"{name} [dim]({run_type})[/dim]"
-
-    renderables: list[Any] = []
-
-    if include_metadata:
-        if data.get("total_tokens"):
-            renderables.append(
-                f"[bold]Tokens:[/bold] {data['total_tokens']} (prompt: {data.get('prompt_tokens', 0)}, completion: {data.get('completion_tokens', 0)})"
-            )
-
-    messages = _extract_messages(data)
-    if messages:
-        renderables.append("")
-        for msg in messages:
-            renderables.append(_format_message_panel(msg))
-
-    for child in child_runs:
-        renderables.append(_format_child_run_panel(child, include_metadata=include_metadata))
-
-    border_style = "green" if status == "success" else "red" if status == "error" else "blue"
-    return Panel(
-        Group(*renderables) if renderables else "",
-        title=title,
-        border_style=border_style,
         expand=False,
     )
