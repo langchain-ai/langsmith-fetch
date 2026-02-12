@@ -392,8 +392,11 @@ class TestFetchRecentTraces:
         )
 
         traces_data = fetchers.fetch_recent_traces(
-            api_key=TEST_API_KEY, base_url=TEST_BASE_URL, limit=2,
-            include_metadata=False, include_feedback=False
+            api_key=TEST_API_KEY,
+            base_url=TEST_BASE_URL,
+            limit=2,
+            include_metadata=False,
+            include_feedback=False,
         )
 
         # Verify Client was instantiated with correct API key
@@ -493,8 +496,11 @@ class TestFetchRecentTraces:
         )
 
         traces_data = fetchers.fetch_recent_traces(
-            api_key=TEST_API_KEY, base_url=TEST_BASE_URL, last_n_minutes=30,
-            include_metadata=False, include_feedback=False
+            api_key=TEST_API_KEY,
+            base_url=TEST_BASE_URL,
+            last_n_minutes=30,
+            include_metadata=False,
+            include_feedback=False,
         )
 
         # Verify list_runs was called with start_time
@@ -532,8 +538,11 @@ class TestFetchRecentTraces:
 
         since_timestamp = "2025-12-09T10:00:00Z"
         traces_data = fetchers.fetch_recent_traces(
-            api_key=TEST_API_KEY, base_url=TEST_BASE_URL, since=since_timestamp,
-            include_metadata=False, include_feedback=False
+            api_key=TEST_API_KEY,
+            base_url=TEST_BASE_URL,
+            since=since_timestamp,
+            include_metadata=False,
+            include_feedback=False,
         )
 
         # Verify list_runs was called with start_time

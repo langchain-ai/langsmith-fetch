@@ -26,7 +26,9 @@ except ImportError:
     HAS_LANGSMITH = False
 
 
-def fetch_thread(thread_id: str, project_uuid: str, *, base_url: str, api_key: str) -> list[dict[str, Any]]:
+def fetch_thread(
+    thread_id: str, project_uuid: str, *, base_url: str, api_key: str
+) -> list[dict[str, Any]]:
     """
     Fetch messages for a LangGraph thread by thread_id.
 
@@ -174,7 +176,9 @@ def fetch_recent_threads(
     def _fetch_thread_safe(thread_id: str) -> tuple[str, list[dict[str, Any]] | None]:
         """Safe wrapper for fetch_thread that returns (thread_id, messages or None)."""
         try:
-            messages = fetch_thread(thread_id, project_uuid, base_url=base_url, api_key=api_key)
+            messages = fetch_thread(
+                thread_id, project_uuid, base_url=base_url, api_key=api_key
+            )
             return (thread_id, messages)
         except Exception as e:
             logger.warning(f"Failed to fetch thread {thread_id}: {e}")
@@ -184,13 +188,18 @@ def fetch_recent_threads(
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit all fetch tasks
-        future_to_thread = {executor.submit(_fetch_thread_safe, thread_id): thread_id for thread_id in thread_info.keys()}
+        future_to_thread = {
+            executor.submit(_fetch_thread_safe, thread_id): thread_id
+            for thread_id in thread_info.keys()
+        }
 
         # Use progress bar if requested
         if show_progress:
             with Progress(
                 SpinnerColumn(),
-                TextColumn("[bold blue]Fetching {task.completed}/{task.total} threads..."),
+                TextColumn(
+                    "[bold blue]Fetching {task.completed}/{task.total} threads..."
+                ),
                 BarColumn(),
                 TaskProgressColumn(),
             ) as progress:
@@ -281,7 +290,9 @@ def fetch_latest_trace(
     return fetch_trace(trace_id, base_url=base_url, api_key=api_key)
 
 
-def _fetch_trace_safe(trace_id: str, base_url: str, api_key: str) -> tuple[str, list[dict[str, Any]] | None, Exception | None]:
+def _fetch_trace_safe(
+    trace_id: str, base_url: str, api_key: str
+) -> tuple[str, list[dict[str, Any]] | None, Exception | None]:
     """Fetch a single trace with error handling.
 
     Returns:
@@ -342,7 +353,12 @@ def _fetch_traces_concurrent(
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit all fetch tasks
-        future_to_trace = {executor.submit(_fetch_trace_safe, str(run.id), base_url, api_key): str(run.id) for run in runs}
+        future_to_trace = {
+            executor.submit(_fetch_trace_safe, str(run.id), base_url, api_key): str(
+                run.id
+            )
+            for run in runs
+        }
 
         # Setup progress bar if requested
         if show_progress:
@@ -393,7 +409,9 @@ def _fetch_traces_concurrent(
     timing_info["fetch_duration"] = perf_counter() - timing_info["fetch_start"]
     timing_info["individual_timings"] = individual_timings
     if timing_info["traces_succeeded"] > 0:
-        timing_info["avg_per_trace"] = timing_info["fetch_duration"] / timing_info["traces_succeeded"]
+        timing_info["avg_per_trace"] = (
+            timing_info["fetch_duration"] / timing_info["traces_succeeded"]
+        )
 
     # Batch fetch feedback for all runs that have it
     if include_metadata and include_feedback and runs_with_feedback:
@@ -421,7 +439,10 @@ def fetch_recent_traces(
     return_timing: bool = False,
     include_metadata: bool = False,
     include_feedback: bool = False,
-) -> list[tuple[str, list[dict[str, Any]] | dict[str, Any]]] | tuple[list[tuple[str, list[dict[str, Any]] | dict[str, Any]]], dict]:
+) -> (
+    list[tuple[str, list[dict[str, Any]] | dict[str, Any]]]
+    | tuple[list[tuple[str, list[dict[str, Any]] | dict[str, Any]]], dict]
+):
     """Fetch multiple recent traces from LangSmith with concurrent fetching.
 
     Searches for recent root traces by chronological timestamp and returns
@@ -471,7 +492,9 @@ def fetch_recent_traces(
         ...     print(f"  Feedback: {len(trace_data['feedback'])} items")
     """
     if not HAS_LANGSMITH:
-        raise Exception("langsmith package required for fetching multiple traces. Install with: pip install langsmith")
+        raise Exception(
+            "langsmith package required for fetching multiple traces. Install with: pip install langsmith"
+        )
 
     from datetime import datetime, timedelta, timezone
 
@@ -519,7 +542,9 @@ def fetch_recent_traces(
     )
 
     if not results:
-        raise ValueError(f"Successfully queried {len(runs)} traces but failed to fetch messages for all of them")
+        raise ValueError(
+            f"Successfully queried {len(runs)} traces but failed to fetch messages for all of them"
+        )
 
     # Add list_runs timing to timing info
     timing_info["list_runs_duration"] = list_duration
@@ -593,7 +618,12 @@ def _extract_run_metadata_from_sdk_run(run) -> dict[str, Any]:
     """
     # Calculate duration if we have both start and end times
     duration_ms = None
-    if hasattr(run, "start_time") and hasattr(run, "end_time") and run.start_time and run.end_time:
+    if (
+        hasattr(run, "start_time")
+        and hasattr(run, "end_time")
+        and run.start_time
+        and run.end_time
+    ):
         try:
             duration_ms = int((run.end_time - run.start_time).total_seconds() * 1000)
         except (AttributeError, TypeError):
@@ -606,8 +636,12 @@ def _extract_run_metadata_from_sdk_run(run) -> dict[str, Any]:
 
     return {
         "status": getattr(run, "status", None),
-        "start_time": run.start_time.isoformat() if hasattr(run, "start_time") and run.start_time else None,
-        "end_time": run.end_time.isoformat() if hasattr(run, "end_time") and run.end_time else None,
+        "start_time": run.start_time.isoformat()
+        if hasattr(run, "start_time") and run.start_time
+        else None,
+        "end_time": run.end_time.isoformat()
+        if hasattr(run, "end_time") and run.end_time
+        else None,
         "duration_ms": duration_ms,
         "custom_metadata": custom_metadata,
         "token_usage": {
@@ -674,7 +708,9 @@ def _serialize_feedback(fb) -> dict[str, Any]:
         "value": getattr(fb, "value", None),
         "comment": getattr(fb, "comment", None),
         "correction": getattr(fb, "correction", None),
-        "created_at": fb.created_at.isoformat() if hasattr(fb, "created_at") and fb.created_at else None,
+        "created_at": fb.created_at.isoformat()
+        if hasattr(fb, "created_at") and fb.created_at
+        else None,
     }
 
 

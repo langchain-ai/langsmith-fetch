@@ -168,7 +168,9 @@ def thread(
     base_url = config.get_base_url()
     api_key = config.get_api_key()
     if not api_key:
-        click.echo("Error: LANGSMITH_API_KEY not found in environment or config", err=True)
+        click.echo(
+            "Error: LANGSMITH_API_KEY not found in environment or config", err=True
+        )
         sys.exit(1)
 
     # Get project UUID (from option or config)
@@ -197,7 +199,9 @@ def thread(
             )
             formatters.print_formatted_trace(thread_data, format_type, output_file)
         else:
-            messages = fetchers.fetch_thread(thread_id, project_uuid, base_url=base_url, api_key=api_key)
+            messages = fetchers.fetch_thread(
+                thread_id, project_uuid, base_url=base_url, api_key=api_key
+            )
             formatters.print_formatted(messages, format_type, output_file)
 
     except Exception as e:
@@ -270,7 +274,9 @@ def trace(trace_id, format_type, output_file, include_metadata, include_feedback
     base_url = config.get_base_url()
     api_key = config.get_api_key()
     if not api_key:
-        click.echo("Error: LANGSMITH_API_KEY not found in environment or config", err=True)
+        click.echo(
+            "Error: LANGSMITH_API_KEY not found in environment or config", err=True
+        )
         sys.exit(1)
 
     # Get format (from option or config)
@@ -291,7 +297,9 @@ def trace(trace_id, format_type, output_file, include_metadata, include_feedback
             formatters.print_formatted_trace(trace_data, format_type, output_file)
         else:
             # Fetch messages only (no metadata/feedback)
-            messages = fetchers.fetch_trace(trace_id, base_url=base_url, api_key=api_key)
+            messages = fetchers.fetch_trace(
+                trace_id, base_url=base_url, api_key=api_key
+            )
             # Output just messages
             formatters.print_formatted(messages, format_type, output_file)
 
@@ -405,14 +413,18 @@ def threads(
 
     # Validate mutually exclusive options
     if last_n_minutes is not None and since is not None:
-        click.echo("Error: --last-n-minutes and --since are mutually exclusive", err=True)
+        click.echo(
+            "Error: --last-n-minutes and --since are mutually exclusive", err=True
+        )
         sys.exit(1)
 
     # Get API key and base URL
     base_url = config.get_base_url()
     api_key = config.get_api_key()
     if not api_key:
-        click.echo("Error: LANGSMITH_API_KEY not found in environment or config", err=True)
+        click.echo(
+            "Error: LANGSMITH_API_KEY not found in environment or config", err=True
+        )
         sys.exit(1)
 
     # Get project UUID (from option or config) - REQUIRED
@@ -454,9 +466,13 @@ def threads(
 
         # Validate filename pattern
         has_thread_id = re.search(r"\{thread_id[^}]*\}", filename_pattern)
-        has_index = re.search(r"\{index[^}]*\}", filename_pattern) or re.search(r"\{idx[^}]*\}", filename_pattern)
+        has_index = re.search(r"\{index[^}]*\}", filename_pattern) or re.search(
+            r"\{idx[^}]*\}", filename_pattern
+        )
         if not (has_thread_id or has_index):
-            click.echo("Error: Filename pattern must contain {thread_id} or {index}", err=True)
+            click.echo(
+                "Error: Filename pattern must contain {thread_id} or {index}", err=True
+            )
             sys.exit(1)
 
         # Create output directory
@@ -469,7 +485,9 @@ def threads(
 
         # Verify writable
         if not os.access(output_path, os.W_OK):
-            click.echo(f"Error: Output directory is not writable: {output_path}", err=True)
+            click.echo(
+                f"Error: Output directory is not writable: {output_path}", err=True
+            )
             sys.exit(1)
 
         # Fetch threads
@@ -500,7 +518,9 @@ def threads(
 
         # Save each thread to file
         for index, (thread_id, messages) in enumerate(threads_data, start=1):
-            filename_str = filename_pattern.format(thread_id=thread_id, index=index, idx=index)
+            filename_str = filename_pattern.format(
+                thread_id=thread_id, index=index, idx=index
+            )
             safe_filename = sanitize_filename(filename_str)
             if not safe_filename.endswith(".json"):
                 safe_filename = f"{safe_filename}.json"
@@ -508,9 +528,13 @@ def threads(
             filename = output_path / safe_filename
             with open(filename, "w") as f:
                 json.dump(messages, f, indent=2, default=str)
-            click.echo(f"  ✓ Saved {thread_id} to {safe_filename} ({len(messages)} messages)")
+            click.echo(
+                f"  ✓ Saved {thread_id} to {safe_filename} ({len(messages)} messages)"
+            )
 
-        click.echo(f"\n✓ Successfully saved {len(threads_data)} thread(s) to {output_path}/")
+        click.echo(
+            f"\n✓ Successfully saved {len(threads_data)} thread(s) to {output_path}/"
+        )
 
     # STDOUT MODE: no output_dir
     else:
@@ -685,14 +709,18 @@ def traces(
 
     # Validate mutually exclusive options
     if last_n_minutes is not None and since is not None:
-        click.echo("Error: --last-n-minutes and --since are mutually exclusive", err=True)
+        click.echo(
+            "Error: --last-n-minutes and --since are mutually exclusive", err=True
+        )
         sys.exit(1)
 
     # Get API key and base URL
     base_url = config.get_base_url()
     api_key = config.get_api_key()
     if not api_key:
-        click.echo("Error: LANGSMITH_API_KEY not found in environment or config", err=True)
+        click.echo(
+            "Error: LANGSMITH_API_KEY not found in environment or config", err=True
+        )
         sys.exit(1)
 
     # Get project UUID from config if not provided
@@ -729,9 +757,13 @@ def traces(
 
         # Validate filename pattern
         has_trace_id = re.search(r"\{trace_id[^}]*\}", filename_pattern)
-        has_index = re.search(r"\{index[^}]*\}", filename_pattern) or re.search(r"\{idx[^}]*\}", filename_pattern)
+        has_index = re.search(r"\{index[^}]*\}", filename_pattern) or re.search(
+            r"\{idx[^}]*\}", filename_pattern
+        )
         if not (has_trace_id or has_index):
-            click.echo("Error: Filename pattern must contain {trace_id} or {index}", err=True)
+            click.echo(
+                "Error: Filename pattern must contain {trace_id} or {index}", err=True
+            )
             sys.exit(1)
 
         # Create output directory
@@ -744,7 +776,9 @@ def traces(
 
         # Verify writable
         if not os.access(output_path, os.W_OK):
-            click.echo(f"Error: Output directory is not writable: {output_path}", err=True)
+            click.echo(
+                f"Error: Output directory is not writable: {output_path}", err=True
+            )
             sys.exit(1)
 
         # Fetch traces
@@ -775,13 +809,19 @@ def traces(
         fetch_time = timing_info.get("fetch_duration", 0)
         avg_time = timing_info.get("avg_per_trace", 0)
 
-        click.echo(f"Found {len(traces_data)} trace(s) in {total_time:.2f}s. Saving to {output_path}/")
+        click.echo(
+            f"Found {len(traces_data)} trace(s) in {total_time:.2f}s. Saving to {output_path}/"
+        )
         if len(traces_data) > 1 and avg_time > 0:
-            click.echo(f"  (Fetch time: {fetch_time:.2f}s, avg: {avg_time:.2f}s per trace)")
+            click.echo(
+                f"  (Fetch time: {fetch_time:.2f}s, avg: {avg_time:.2f}s per trace)"
+            )
 
         # Save each trace to file with metadata and feedback
         for index, (trace_id, trace_data) in enumerate(traces_data, start=1):
-            filename_str = filename_pattern.format(trace_id=trace_id, index=index, idx=index)
+            filename_str = filename_pattern.format(
+                trace_id=trace_id, index=index, idx=index
+            )
             safe_filename = sanitize_filename(filename_str)
             if not safe_filename.endswith(".json"):
                 safe_filename = f"{safe_filename}.json"
@@ -806,7 +846,9 @@ def traces(
 
             click.echo(f"  ✓ Saved {trace_id} to {safe_filename} ({summary})")
 
-        click.echo(f"\n✓ Successfully saved {len(traces_data)} trace(s) to {output_path}/")
+        click.echo(
+            f"\n✓ Successfully saved {len(traces_data)} trace(s) to {output_path}/"
+        )
 
     # STDOUT MODE: no output_dir
     else:
@@ -834,7 +876,9 @@ def traces(
             if limit == 1 and len(traces_data) == 1:
                 trace_id, trace_data = traces_data[0]
                 if output_file:
-                    formatters.print_formatted_trace(trace_data, format_type, output_file)
+                    formatters.print_formatted_trace(
+                        trace_data, format_type, output_file
+                    )
                     click.echo(f"Saved trace to {output_file}")
                 else:
                     formatters.print_formatted_trace(trace_data, format_type, None)
@@ -859,7 +903,9 @@ def traces(
                         from rich.syntax import Syntax
 
                         json_str = json.dumps(output_data, indent=2, default=str)
-                        syntax = Syntax(json_str, "json", theme="monokai", line_numbers=False)
+                        syntax = Syntax(
+                            json_str, "json", theme="monokai", line_numbers=False
+                        )
                         console.print(syntax)
                     else:  # pretty
                         for trace_id, trace_data in traces_data:

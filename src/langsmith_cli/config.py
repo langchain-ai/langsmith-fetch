@@ -115,7 +115,9 @@ def _update_project_config(project_name: str, project_uuid: str):
     save_config(config)
 
 
-def _lookup_project_uuid_by_name(project_name: str, api_key: str, base_url: str | None = None) -> str:
+def _lookup_project_uuid_by_name(
+    project_name: str, api_key: str, base_url: str | None = None
+) -> str:
     """
     Look up project UUID by name using LangSmith API.
 
@@ -164,7 +166,11 @@ def get_base_url() -> str:
     Returns:
         Base URL from LANGSMITH_ENDPOINT env var, or config file, or default
     """
-    return os.environ.get("LANGSMITH_ENDPOINT") or get_config_value("base_url") or "https://api.smith.langchain.com"
+    return (
+        os.environ.get("LANGSMITH_ENDPOINT")
+        or get_config_value("base_url")
+        or "https://api.smith.langchain.com"
+    )
 
 
 def get_project_uuid() -> str | None:
@@ -207,7 +213,9 @@ def get_project_uuid() -> str | None:
 
     api_key = get_api_key()
     if not api_key:
-        logger.warning("LANGSMITH_PROJECT set but no API key found. Set LANGSMITH_API_KEY to enable project lookup.")
+        logger.warning(
+            "LANGSMITH_PROJECT set but no API key found. Set LANGSMITH_API_KEY to enable project lookup."
+        )
         return None
 
     base_url = get_base_url()
