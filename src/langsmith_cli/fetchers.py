@@ -3,6 +3,7 @@
 import json
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta, timezone
 from time import perf_counter
 from typing import Any
 
@@ -125,7 +126,6 @@ def fetch_recent_threads(
     Raises:
         requests.HTTPError: If the API request fails
     """
-    from datetime import datetime, timedelta, timezone
 
     headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
 
@@ -251,7 +251,6 @@ def fetch_latest_trace(
         ValueError: If no traces found matching criteria
         Exception: If API request fails
     """
-    from datetime import datetime, timedelta, timezone
 
     from langsmith import Client
 
@@ -496,8 +495,6 @@ def fetch_recent_traces(
             "langsmith package required for fetching multiple traces. Install with: pip install langsmith"
         )
 
-    from datetime import datetime, timedelta, timezone
-
     from langsmith import Client
 
     # Initialize client
@@ -569,7 +566,6 @@ def _extract_run_metadata(run_data: dict) -> dict[str, Any]:
     Returns:
         Dictionary with extracted metadata fields
     """
-    from datetime import datetime
 
     extra = run_data.get("extra") or {}
     custom_metadata = extra.get("metadata") or {}
