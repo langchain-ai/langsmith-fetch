@@ -89,10 +89,94 @@ def fetch_trace(trace_id: str, *, base_url: str, api_key: str) -> list[dict[str,
 
     data = response.json()
 
-    # Extract messages from outputs
     messages = data.get("messages")
     output_messages = (data.get("outputs") or {}).get("messages")
     return messages or output_messages or []
+
+
+def fetch_run(run_id: str, *, base_url: str, api_key: str) -> dict[str, Any]:
+    """
+    Fetch a single run by run ID.
+
+    Args:
+        run_id: LangSmith run UUID
+        base_url: LangSmith base URL
+        api_key: LangSmith API key
+
+    Returns:
+        Full run data dictionary
+
+    Raises:
+        requests.HTTPError: If the API request fails
+    """
+    headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
+
+    url = f"{base_url}/runs/{run_id}"
+
+    response = requests.get(url, headers=headers)
+    response.raise_for_status()
+
+    return response.json()
+
+
+def fetch_run_with_children(
+    run_id: str, *, base_url: str, api_key: str, max_workers: int = 2
+) -> dict[str, Any]:
+    """
+    Fetch a run with all its child runs recursively.
+
+    Args:
+        run_id: LangSmith run UUID
+        base_url: LangSmith base URL
+        api_key: LangSmith API key
+        max_workers: Maximum concurrent fetches (default: 2, lower to avoid rate limits)
+
+    Returns:
+        Run data dictionary with 'child_runs' key containing nested child runs
+
+    Raises:
+        requests.HTTPError: If the API request fails
+    """
+    import time
+
+    data = fetch_run(run_id, base_url=base_url, api_key=api_key)
+
+    direct_child_run_ids = data.get("direct_child_run_ids", [])
+    if direct_child_run_ids:
+        child_runs = []
+
+        def fetch_child(rid: str, retries: int = 5) -> dict[str, Any] | None:
+            for attempt in range(retries):
+                try:
+                    return fetch_run_with_children(
+                        rid, base_url=base_url, api_key=api_key, max_workers=max_workers
+                    )
+                except requests.HTTPError as e:
+                    if e.response.status_code == 429 and attempt < retries - 1:
+                        wait_time = (attempt + 1) ** 2
+                        logger.warning(
+                            f"Rate limited on {rid}, retrying in {wait_time}s..."
+                        )
+                        time.sleep(wait_time)
+                    else:
+                        raise
+                except Exception as e:
+                    logger.warning(f"Failed to fetch child run {rid}: {e}")
+                    return None
+            return None
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(fetch_child, rid) for rid in direct_child_run_ids
+            ]
+            for future in as_completed(futures):
+                result = future.result()
+                if result:
+                    child_runs.append(result)
+
+        data["child_runs"] = child_runs
+
+    return data
 
 
 def fetch_recent_threads(
@@ -809,13 +893,10 @@ def fetch_trace_with_metadata(
 
     data = response.json()
 
-    # Extract messages
     messages = data.get("messages") or (data.get("outputs") or {}).get("messages") or []
 
-    # Extract metadata from the full Run object
     metadata = _extract_run_metadata(data)
 
-    # Fetch feedback if requested and feedback exists
     feedback = []
     if include_feedback and _has_feedback(metadata):
         feedback = _fetch_feedback(trace_id, api_key=api_key)
@@ -825,6 +906,53 @@ def fetch_trace_with_metadata(
         "messages": messages,
         "metadata": metadata,
         "feedback": feedback,
+    }
+
+
+def fetch_run_with_metadata(
+    run_id: str,
+    *,
+    base_url: str,
+    api_key: str,
+    include_feedback: bool = True,
+) -> dict[str, Any]:
+    """Fetch run with metadata and optional feedback.
+
+    Args:
+        run_id: LangSmith run UUID
+        base_url: LangSmith base URL
+        api_key: LangSmith API key
+        include_feedback: Whether to fetch full feedback objects (default: True)
+
+    Returns:
+        Dictionary with keys:
+            - run_id: Run UUID
+            - messages: List of message dictionaries (if available)
+            - metadata: Metadata dict with status, timing, tokens, costs, etc.
+            - feedback: List of feedback dicts (empty if no feedback or include_feedback=False)
+            - inputs: Run inputs
+            - outputs: Run outputs
+
+    Raises:
+        requests.HTTPError: If the API request fails
+    """
+    data = fetch_run(run_id, base_url=base_url, api_key=api_key)
+
+    messages = data.get("messages") or (data.get("outputs") or {}).get("messages") or []
+
+    metadata = _extract_run_metadata(data)
+
+    feedback = []
+    if include_feedback and _has_feedback(metadata):
+        feedback = _fetch_feedback(run_id, api_key=api_key)
+
+    return {
+        "run_id": run_id,
+        "messages": messages,
+        "metadata": metadata,
+        "feedback": feedback,
+        "inputs": data.get("inputs"),
+        "outputs": data.get("outputs"),
     }
 
 

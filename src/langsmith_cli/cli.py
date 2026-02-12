@@ -270,7 +270,6 @@ def trace(trace_id, format_type, output_file, include_metadata, include_feedback
       - API key stored via: langsmith-fetch config set api-key <key>
     """
 
-    # Get API key
     base_url = config.get_base_url()
     api_key = config.get_api_key()
     if not api_key:
@@ -279,32 +278,107 @@ def trace(trace_id, format_type, output_file, include_metadata, include_feedback
         )
         sys.exit(1)
 
-    # Get format (from option or config)
     if not format_type:
         format_type = config.get_default_format()
 
     try:
-        # Fetch trace with or without metadata/feedback
         if include_metadata or include_feedback:
-            # Fetch with metadata and/or feedback
             trace_data = fetchers.fetch_trace_with_metadata(
                 trace_id,
                 base_url=base_url,
                 api_key=api_key,
                 include_feedback=include_feedback,
             )
-            # Output with metadata and feedback
             formatters.print_formatted_trace(trace_data, format_type, output_file)
         else:
-            # Fetch messages only (no metadata/feedback)
             messages = fetchers.fetch_trace(
                 trace_id, base_url=base_url, api_key=api_key
             )
-            # Output just messages
             formatters.print_formatted(messages, format_type, output_file)
 
     except Exception as e:
         click.echo(f"Error fetching trace: {e}", err=True)
+        sys.exit(1)
+
+
+@main.command()
+@click.argument("run_id", metavar="RUN_ID")
+@click.option(
+    "--format",
+    "format_type",
+    type=click.Choice(["raw", "json", "pretty"]),
+    help="Output format: raw (compact JSON), json (pretty JSON), pretty (human-readable panels)",
+)
+@click.option(
+    "--file",
+    "output_file",
+    metavar="PATH",
+    help="Save output to file instead of printing to stdout",
+)
+@click.option(
+    "--include-metadata",
+    is_flag=True,
+    default=False,
+    help="Include metadata (tokens, costs) in output",
+)
+def run(run_id, format_type, output_file, include_metadata):
+    """Fetch a single run by run ID with all child runs.
+
+    A run represents a single operation (LLM call, tool execution, etc.) within a trace.
+    This command retrieves the full run data including inputs, outputs, messages, and all
+    nested child runs recursively.
+
+    \b
+    ARGUMENTS:
+      RUN_ID    LangSmith run UUID (e.g., 019c3451-3b5f-7190-92fc-72b7b2a78e9d)
+
+    \b
+    RETURNS:
+      Full run data dictionary with nested child_runs.
+
+    \b
+    EXAMPLES:
+      # Fetch run data with all child runs
+      langsmith-fetch run 019c3451-3b5f-7190-92fc-72b7b2a78e9d
+
+      # Fetch run with metadata (tokens, costs)
+      langsmith-fetch run 019c3451-3b5f-7190-92fc-72b7b2a78e9d --include-metadata
+
+      # Fetch run as JSON for parsing
+      langsmith-fetch run 019c3451-3b5f-7190-92fc-72b7b2a78e9d --format json
+
+      # Save run to file
+      langsmith-fetch run 019c3451-3b5f-7190-92fc-72b7b2a78e9d --file run.json
+
+    \b
+    PREREQUISITES:
+      - LANGSMITH_API_KEY environment variable must be set, or
+      - API key stored via: langsmith-fetch config set api-key <key>
+    """
+
+    base_url = config.get_base_url()
+    api_key = config.get_api_key()
+    if not api_key:
+        click.echo(
+            "Error: LANGSMITH_API_KEY not found in environment or config", err=True
+        )
+        sys.exit(1)
+
+    if not format_type:
+        format_type = config.get_default_format()
+
+    try:
+        run_data = fetchers.fetch_run_with_children(
+            run_id,
+            base_url=base_url,
+            api_key=api_key,
+        )
+        formatters.print_formatted_run(
+            run_data, format_type, output_file, include_metadata=include_metadata
+        )
+
+    except Exception as e:
+        click.echo(f"Error fetching run: {e}", err=True)
         sys.exit(1)
 
 
