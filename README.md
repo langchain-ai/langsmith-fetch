@@ -1,3 +1,8 @@
+> [!WARNING]
+> **⚠️ DEPRECATION NOTICE**
+>
+> This repository is no longer actively maintained and will not receive further updates. The project has been deprecated and users are advised to seek alternative solutions.
+
 # LangSmith Fetch
 
 LangSmith Fetch is CLI for fetching threads or traces from LangSmith projects. It is designed to be easily used by humans or code agents to programmatically fetch LangSmith data for testing and debugging. 
