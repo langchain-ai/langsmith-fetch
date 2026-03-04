@@ -1,7 +1,7 @@
 > [!WARNING]
 > **⚠️ DEPRECATION NOTICE**
 >
-> This repository is no longer actively maintained and will not receive further updates. The project has been deprecated and users are advised to seek alternative solutions.
+> This repository is no longer actively maintained and will not receive further updates. The project has been deprecated and users are advised to use the `langsmith-skills` project instead: [langsmith-skills](https://github.com/langchain-ai/langsmith-skills).
 
 # LangSmith Fetch
 
