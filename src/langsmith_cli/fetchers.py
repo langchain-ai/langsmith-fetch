@@ -412,7 +412,7 @@ def _fetch_traces_concurrent(
     # Batch fetch feedback for all runs that have it
     if include_metadata and include_feedback and runs_with_feedback:
         feedback_start = perf_counter()
-        feedback_map = _fetch_feedback_batch(runs_with_feedback, api_key, max_workers)
+        feedback_map = _fetch_feedback_batch(runs_with_feedback, base_url, api_key, max_workers)
         timing_info["feedback_duration"] = perf_counter() - feedback_start
 
         # Add feedback to corresponding traces
@@ -703,7 +703,7 @@ def _serialize_feedback(fb) -> dict[str, Any]:
     }
 
 
-def _fetch_feedback(run_id: str, *, api_key: str) -> list[dict[str, Any]]:
+def _fetch_feedback(run_id: str, *, base_url: str, api_key: str) -> list[dict[str, Any]]:
     """Fetch full feedback objects for a single run.
 
     Args:
@@ -719,7 +719,7 @@ def _fetch_feedback(run_id: str, *, api_key: str) -> list[dict[str, Any]]:
     from langsmith import Client
 
     try:
-        client = Client(api_key=api_key)
+        client = Client(api_url=base_url, api_key=api_key)
         feedback_list = list(client.list_feedback(run_id=run_id))
         return [_serialize_feedback(fb) for fb in feedback_list]
     except Exception as e:
@@ -729,6 +729,7 @@ def _fetch_feedback(run_id: str, *, api_key: str) -> list[dict[str, Any]]:
 
 def _fetch_feedback_batch(
     run_ids: list[str],
+    base_url: str,
     api_key: str,
     max_workers: int = 5,
 ) -> dict[str, list[dict[str, Any]]]:
@@ -748,7 +749,7 @@ def _fetch_feedback_batch(
     def fetch_single(run_id: str) -> tuple[str, list[dict[str, Any]]]:
         """Fetch feedback for a single run with error handling."""
         try:
-            feedback = _fetch_feedback(run_id, api_key=api_key)
+            feedback = _fetch_feedback(run_id, base_url=base_url, api_key=api_key)
             return run_id, feedback
         except Exception:
             return run_id, []
@@ -811,7 +812,7 @@ def fetch_trace_with_metadata(
     # Fetch feedback if requested and feedback exists
     feedback = []
     if include_feedback and _has_feedback(metadata):
-        feedback = _fetch_feedback(trace_id, api_key=api_key)
+        feedback = _fetch_feedback(trace_id, base_url=base_url, api_key=api_key)
 
     return {
         "trace_id": trace_id,
@@ -859,7 +860,7 @@ def fetch_thread_with_metadata(
         try:
             from langsmith import Client
 
-            client = Client(api_key=api_key)
+            client = Client(api_url=base_url, api_key=api_key)
 
             # Query for root runs with this thread_id (most recent first)
             runs = list(
@@ -876,7 +877,7 @@ def fetch_thread_with_metadata(
 
                 # Fetch feedback if requested and feedback exists
                 if include_feedback and _sdk_run_has_feedback(root_run):
-                    feedback = _fetch_feedback(str(root_run.id), api_key=api_key)
+                    feedback = _fetch_feedback(str(root_run.id), base_url=base_url, api_key=api_key)
 
         except Exception as e:
             print(
