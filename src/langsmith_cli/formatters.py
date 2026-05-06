@@ -55,7 +55,7 @@ def _format_pretty(messages: list[dict[str, Any]]) -> str:
         output_parts.append("-" * 60)
 
         # Format content based on message type
-        content = msg.get("content", "")
+        content = msg.get("content") or msg.get("kwargs", {}).get("content", "")
 
         if isinstance(content, str):
             output_parts.append(content)
@@ -128,7 +128,7 @@ def print_formatted(
             title = f"Message {i}: {msg_type.upper()}"
 
             # Format content
-            content = msg.get("content", "")
+            content = msg.get("content") or msg.get("kwargs", {}).get("content", "")
             if isinstance(content, str):
                 panel_content = content
             elif isinstance(content, list):
