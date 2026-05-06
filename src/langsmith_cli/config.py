@@ -6,6 +6,8 @@ from typing import Any
 
 import yaml
 
+from .logging import logger
+
 CONFIG_DIR = Path.home() / ".langsmith-cli"
 CONFIG_FILE = CONFIG_DIR / "config.yaml"
 
@@ -114,9 +116,7 @@ def _update_project_config(project_name: str, project_uuid: str):
 
 
 def _lookup_project_uuid_by_name(
-    project_name: str,
-    api_key: str,
-    base_url: str | None = None
+    project_name: str, api_key: str, base_url: str | None = None
 ) -> str:
     """
     Look up project UUID by name using LangSmith API.
@@ -146,35 +146,31 @@ def _lookup_project_uuid_by_name(
             f"Project '{project_name}' not found: {e}\n"
             f"Use 'langsmith-fetch config set project-uuid <uuid>' to set explicitly, "
             f"or set LANGSMITH_PROJECT_UUID env var."
-        )
+        ) from e
 
 
 def get_api_key() -> str | None:
     """
-    Get API key from config or environment variable.
+    Get API key from environment variable or config.
 
     Returns:
-        API key from config file, or LANGSMITH_API_KEY env var, or None
+        API key from LANGSMITH_API_KEY env var, or config file, or None
     """
-    # Try config file first
-    api_key = get_config_value("api_key")
-    if api_key:
-        return api_key
-
-    # Fall back to environment variable
-    return os.environ.get("LANGSMITH_API_KEY")
+    return os.environ.get("LANGSMITH_API_KEY") or get_config_value("api_key")
 
 
-def get_base_url() -> str | None:
+def get_base_url() -> str:
     """
-    Get base URL from config.
+    Get base URL from environment variable or config.
 
     Returns:
-        Base URL from config file, or LANGSMITH_ENDPOINT env var, or None
+        Base URL from LANGSMITH_ENDPOINT env var, or config file, or default
     """
-    if base_url := get_config_value("base_url"):
-        return base_url
-    return os.environ.get("LANGSMITH_ENDPOINT") or "https://api.smith.langchain.com"
+    return (
+        os.environ.get("LANGSMITH_ENDPOINT")
+        or get_config_value("base_url")
+        or "https://api.smith.langchain.com"
+    )
 
 
 def get_project_uuid() -> str | None:
@@ -189,85 +185,63 @@ def get_project_uuid() -> str | None:
     Returns:
         Project UUID or None
     """
-    import sys
-
-    # Priority 1: Explicit UUID override (bypasses all config logic)
     env_uuid = os.environ.get("LANGSMITH_PROJECT_UUID")
     if env_uuid:
         return env_uuid
 
-    # Get current project name from env var
     env_project_name = os.environ.get("LANGSMITH_PROJECT")
 
-    # Load config values (use hyphen format as canonical)
     config_project_uuid = get_config_value("project-uuid")
     config_project_name = get_config_value("project-name")
 
-    # Case 1: No env var set - use config as default
     if not env_project_name:
         if config_project_uuid:
             return config_project_uuid
         return None
 
-    # Case 2: Env var IS set - check if it matches config
-
-    # Check in-memory cache first (keyed by project name)
     if env_project_name in _project_uuid_cache:
         cached_uuid = _project_uuid_cache[env_project_name]
-        # If config is out of sync, update it
         if cached_uuid and config_project_name != env_project_name:
             _update_project_config(env_project_name, cached_uuid)
         return cached_uuid
 
-    # Config matches env var - use cached UUID
     if config_project_name == env_project_name and config_project_uuid:
-        # Add to in-memory cache
         _project_uuid_cache[env_project_name] = config_project_uuid
         return config_project_uuid
 
-    # Config doesn't match (or doesn't exist) - need to fetch
-    print(f"Project name changed to '{env_project_name}', fetching UUID...", file=sys.stderr)
+    logger.info(f"Project name changed to '{env_project_name}', fetching UUID...")
 
-    # Validate we have API key before attempting lookup
     api_key = get_api_key()
     if not api_key:
-        print(
-            "Warning: LANGSMITH_PROJECT set but no API key found. "
-            "Set LANGSMITH_API_KEY to enable project lookup.",
-            file=sys.stderr
+        logger.warning(
+            "LANGSMITH_PROJECT set but no API key found. Set LANGSMITH_API_KEY to enable project lookup."
         )
         return None
 
     base_url = get_base_url()
 
-    # Fetch UUID via API
     try:
         uuid = _lookup_project_uuid_by_name(env_project_name, api_key, base_url)
 
-        # Update in-memory cache
         _project_uuid_cache[env_project_name] = uuid
 
-        # Update config with BOTH name and UUID
         _update_project_config(env_project_name, uuid)
 
-        print(f"Found project '{env_project_name}' (UUID: {uuid})", file=sys.stderr)
+        logger.info(f"Found project '{env_project_name}' (UUID: {uuid})")
 
         return uuid
 
     except ValueError as e:
-        print(f"Error: {e}", file=sys.stderr)
+        logger.error(str(e))
         return None
     except Exception as e:
-        print(
-            f"Warning: Failed to lookup project '{env_project_name}': {e}",
-            file=sys.stderr
-        )
+        logger.warning(f"Failed to lookup project '{env_project_name}': {e}")
         return None
 
 
 def get_default_format() -> str:
     """
-    Get default output format from config.
+    Get default output format from environment variable or config.
 
     Returns:
         Output format ('raw', 'json', or 'pretty'), defaults to 'pretty'
