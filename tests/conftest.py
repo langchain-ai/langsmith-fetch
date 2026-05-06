@@ -14,6 +14,11 @@ TEST_PROJECT_UUID = "80f1ecb3-a16b-411e-97ae-1c89adbb5c49"
 TEST_API_KEY = "lsv2_test_key_123"
 TEST_BASE_URL = "https://api.smith.langchain.com"
 
+# Tag-related test constants
+TEST_TAG_1 = "production"
+TEST_TAG_2 = "api-v2"
+TEST_TAG_3 = "staging"
+
 
 @pytest.fixture
 def sample_trace_response():
@@ -92,3 +97,21 @@ def mock_base_url(monkeypatch):
     from langsmith_cli import config
 
     monkeypatch.setattr(config, "get_base_url", lambda: TEST_BASE_URL)
+
+
+@pytest.fixture
+def sample_trace_with_tags():
+    """Sample trace API response with tags."""
+    return {
+        "id": TEST_TRACE_ID,
+        "tags": [TEST_TAG_1, TEST_TAG_2],
+        "outputs": {
+            "messages": [
+                {
+                    "content": "Test message",
+                    "type": "human",
+                    "id": "msg-1",
+                }
+            ]
+        },
+    }
