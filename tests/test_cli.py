@@ -868,3 +868,71 @@ class TestTracesCommand:
         assert "looks like a trace ID" in result.output
         assert "langsmith-fetch trace <trace-id>" in result.output
         assert "langsmith-fetch traces <directory-path>" in result.output
+
+
+class TestTracesCommandTagOption:
+    """Tests for traces command --tag option."""
+
+    @patch("langsmith_cli.fetchers.fetch_traces_by_tags")
+    @patch("langsmith_cli.config.get_api_key")
+    @patch("langsmith_cli.config.get_base_url")
+    def test_traces_single_tag(self, mock_base_url, mock_api_key, mock_fetch):
+        """Test traces command with single --tag option."""
+        mock_api_key.return_value = "test-key"
+        mock_base_url.return_value = "https://api.smith.langchain.com"
+        mock_fetch.return_value = [("trace-1", [{"content": "test"}])]
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["traces", "--tag", "production", "--format", "raw"])
+
+        assert result.exit_code == 0
+        mock_fetch.assert_called_once()
+        call_kwargs = mock_fetch.call_args[1]
+        assert call_kwargs["tags"] == ["production"]
+
+    @patch("langsmith_cli.fetchers.fetch_traces_by_tags")
+    @patch("langsmith_cli.config.get_api_key")
+    @patch("langsmith_cli.config.get_base_url")
+    def test_traces_multiple_tags(self, mock_base_url, mock_api_key, mock_fetch):
+        """Test traces command with multiple --tag options."""
+        mock_api_key.return_value = "test-key"
+        mock_base_url.return_value = "https://api.smith.langchain.com"
+        mock_fetch.return_value = [("trace-1", [{"content": "test"}])]
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["traces", "--tag", "prod", "--tag", "staging", "--format", "raw"]
+        )
+
+        assert result.exit_code == 0
+        call_kwargs = mock_fetch.call_args[1]
+        assert set(call_kwargs["tags"]) == {"prod", "staging"}
+
+    @patch("langsmith_cli.config.get_api_key")
+    def test_traces_tag_requires_api_key(self, mock_api_key):
+        """Test that --tag option still requires API key."""
+        mock_api_key.return_value = None
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["traces", "--tag", "production"])
+
+        assert result.exit_code == 1
+        assert "LANGSMITH_API_KEY" in result.output or "api" in result.output.lower()
+
+    @patch("langsmith_cli.fetchers.fetch_traces_by_tags")
+    @patch("langsmith_cli.config.get_api_key")
+    @patch("langsmith_cli.config.get_base_url")
+    def test_traces_tag_with_limit(self, mock_base_url, mock_api_key, mock_fetch):
+        """Test --tag combined with --limit option."""
+        mock_api_key.return_value = "test-key"
+        mock_base_url.return_value = "https://api.smith.langchain.com"
+        mock_fetch.return_value = [("trace-1", [{"content": "test"}])]
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["traces", "--tag", "production", "--limit", "10", "--format", "raw"]
+        )
+
+        assert result.exit_code == 0
+        call_kwargs = mock_fetch.call_args[1]
+        assert call_kwargs["limit"] == 10
