@@ -149,6 +149,115 @@ def _lookup_project_uuid_by_name(
         )
 
 
+def validate_and_refresh_uuid(
+    project_uuid: str,
+    project_name: str | None,
+    api_key: str,
+    base_url: str | None = None
+) -> str | None:
+    """
+    Validate a cached project UUID and refresh if stale.
+
+    This function validates that a cached project UUID is still valid by attempting
+    to read the project from the LangSmith API. If the UUID is stale (404 or 403),
+    it attempts to refresh by looking up the project by name.
+
+    Args:
+        project_uuid: UUID to validate
+        project_name: Project name for fallback lookup (can be None)
+        api_key: LangSmith API key
+        base_url: Optional base URL override
+
+    Returns:
+        Valid UUID string, or None if validation/refresh fails
+
+    Side Effects:
+        - Updates config file if UUID refreshed
+        - Clears in-memory cache if UUID changed
+        - Prints warnings to stderr
+    """
+    import sys
+    from langsmith import Client
+
+    # Initialize client
+    client = Client(api_key=api_key, api_url=base_url)
+
+    # Try to validate UUID by reading project
+    try:
+        project = client.read_project(project_id=project_uuid)
+        # UUID is valid
+        return str(project.id)
+    except Exception as e:
+        # Check if this is a 404/403 error (stale UUID)
+        is_stale = False
+        if hasattr(e, 'response') and hasattr(e.response, 'status_code'):
+            status_code = e.response.status_code
+            if status_code in [404, 403]:
+                is_stale = True
+        elif "404" in str(e) or "403" in str(e) or "not found" in str(e).lower():
+            is_stale = True
+
+        if is_stale:
+            # UUID appears stale, attempt refresh
+            print(
+                f"Warning: Project UUID appears stale (project not found or access denied)",
+                file=sys.stderr
+            )
+
+            if not project_name:
+                print(
+                    "Error: Cannot refresh UUID without project name. "
+                    "Set LANGSMITH_PROJECT environment variable or configure project-name.",
+                    file=sys.stderr
+                )
+                return None
+
+            # Attempt name-based lookup
+            try:
+                new_uuid = _lookup_project_uuid_by_name(project_name, api_key, base_url)
+
+                # Update config with new UUID
+                _update_project_config(project_name, new_uuid)
+
+                # Clear in-memory cache
+                _project_uuid_cache.clear()
+
+                print(
+                    f"Refreshed project UUID from '{project_uuid}' to '{new_uuid}'",
+                    file=sys.stderr
+                )
+                print(f"Config updated: {CONFIG_FILE}", file=sys.stderr)
+
+                return new_uuid
+
+            except ValueError as lookup_error:
+                print(
+                    f"Error: Could not refresh UUID: {lookup_error}",
+                    file=sys.stderr
+                )
+                print(
+                    f"\nPlease verify:\n"
+                    f"  - Project exists in LangSmith UI\n"
+                    f"  - LANGSMITH_PROJECT is set correctly\n"
+                    f"  - You have access to the project",
+                    file=sys.stderr
+                )
+                return None
+            except Exception as lookup_error:
+                print(
+                    f"Error: UUID refresh failed: {lookup_error}",
+                    file=sys.stderr
+                )
+                return None
+        else:
+            # Network error or other transient failure - don't invalidate
+            print(
+                f"Warning: UUID validation failed ({e}), using cached UUID",
+                file=sys.stderr
+            )
+            return project_uuid
+
+
 def get_api_key() -> str | None:
     """
     Get API key from config or environment variable.
