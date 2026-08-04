@@ -2,6 +2,7 @@
 
 import json
 from datetime import datetime
+from typing import assert_type
 from unittest.mock import Mock, patch
 
 import pytest
@@ -793,3 +794,151 @@ class TestFetchRecentThreads:
         request_body = json.loads(responses.calls[0].request.body)
         assert "start_time" in request_body
         assert len(results) == 1
+
+
+class TestFetchThreadWithMetadata:
+    """Tests for fetch_thread_with_metadata function."""
+
+    @responses.activate
+    @patch("langsmith.Client")
+    def test_fetch_thread_with_metadata_success(
+        self, mock_client_class, sample_thread_response
+    ):
+        """Test successful thread fetching with metadata."""
+        responses.add(
+            responses.GET,
+            f"https://api.smith.langchain.com/runs/threads/{TEST_THREAD_ID}",
+            json=sample_thread_response,
+            status=200,
+        )
+
+        mock_client = Mock()
+        mock_run = Mock()
+        mock_run.id = "run-123"
+        mock_run.status = "success"
+        mock_run.start_time = None
+        mock_run.end_time = None
+        mock_run.extra = {}
+        mock_run.feedback_stats = {}
+        mock_client.list_runs.return_value = [mock_run]
+        mock_client_class.return_value = mock_client
+
+        result = fetchers.fetch_thread_with_metadata(
+            TEST_THREAD_ID,
+            TEST_PROJECT_UUID,
+            base_url=TEST_BASE_URL,
+            api_key=TEST_API_KEY,
+            include_feedback=False,
+        )
+
+        assert result["thread_id"] == TEST_THREAD_ID
+        assert len(result["messages"]) == 3
+        assert result["metadata"]["status"] == "success"
+        assert result["feedback"] == []
+
+    @responses.activate
+    @patch("langsmith.Client")
+    def test_fetch_thread_with_metadata_respects_base_url(
+        self, mock_client_class, sample_thread_response
+    ):
+        """Test that fetch_thread_with_metadata passes base_url to Client constructor."""
+        custom_base_url = "https://custom.langsmith.api/v1"
+
+        responses.add(
+            responses.GET,
+            f"{custom_base_url}/runs/threads/{TEST_THREAD_ID}",
+            json=sample_thread_response,
+            status=200,
+        )
+
+        mock_client = Mock()
+        mock_client.list_runs.return_value = []
+        mock_client_class.return_value = mock_client
+
+        fetchers.fetch_thread_with_metadata(
+            TEST_THREAD_ID,
+            TEST_PROJECT_UUID,
+            base_url=custom_base_url,
+            api_key=TEST_API_KEY,
+            include_feedback=False,
+        )
+
+        mock_client_class.assert_called_once_with(
+            api_url=custom_base_url, api_key=TEST_API_KEY
+        )
+
+    @responses.activate
+    @patch("langsmith.Client")
+    @patch("langsmith_cli.fetchers._fetch_feedback")
+    def test_fetch_thread_with_metadata_with_feedback(
+        self, mock_fetch_feedback, mock_client_class, sample_thread_response
+    ):
+        """Test that fetch_thread_with_metadata fetches feedback with correct base_url."""
+        custom_base_url = "https://custom.langsmith.api/v1"
+
+        responses.add(
+            responses.GET,
+            f"{custom_base_url}/runs/threads/{TEST_THREAD_ID}",
+            json=sample_thread_response,
+            status=200,
+        )
+
+        # Mock a run with feedback
+        mock_client = Mock()
+        mock_run = Mock()
+        mock_run.id = "run-123"
+        mock_run.status = "success"
+        mock_run.start_time = None
+        mock_run.end_time = None
+        mock_run.extra = {}
+        mock_run.feedback_stats = {"thumbs_up": 1}  # Has feedback
+        mock_client.list_runs.return_value = [mock_run]
+        mock_client_class.return_value = mock_client
+        mock_fetch_feedback.return_value = [{"key": "thumbs_up", "score": 1}]
+
+        result = fetchers.fetch_thread_with_metadata(
+            TEST_THREAD_ID,
+            TEST_PROJECT_UUID,
+            base_url=custom_base_url,
+            api_key=TEST_API_KEY,
+            include_feedback=True,
+        )
+
+        # Verify _fetch_feedback was called with the correct base_url
+        mock_fetch_feedback.assert_called_once_with(
+            "run-123", base_url=custom_base_url, api_key=TEST_API_KEY
+        )
+
+        # Verify feedback was included in result
+        assert len(result["feedback"]) == 1
+        assert result["feedback"][0]["key"] == "thumbs_up"
+
+    @responses.activate
+    @patch("langsmith.Client")
+    def test_fetch_thread_with_metadata_without_langsmith(
+        self, mock_client_class, sample_thread_response
+    ):
+        """Test thread fetching when metadata fetch fails gracefully."""
+        responses.add(
+            responses.GET,
+            f"https://api.smith.langchain.com/runs/threads/{TEST_THREAD_ID}",
+            json=sample_thread_response,
+            status=200,
+        )
+
+        mock_client = Mock()
+        mock_client.list_runs.side_effect = Exception("API error")
+        mock_client_class.return_value = mock_client
+
+        result = fetchers.fetch_thread_with_metadata(
+            TEST_THREAD_ID,
+            TEST_PROJECT_UUID,
+            base_url=TEST_BASE_URL,
+            api_key=TEST_API_KEY,
+            include_feedback=False,
+        )
+
+        assert result["thread_id"] == TEST_THREAD_ID
+        assert len(result["messages"]) == 3
+        assert result["metadata"] == {}
+        assert result["feedback"] == []
