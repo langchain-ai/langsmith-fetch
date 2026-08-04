@@ -344,7 +344,12 @@ class TestThreadsCommand:
 
     @responses.activate
     def test_threads_default_limit(
-        self, sample_thread_response, mock_env_api_key, temp_config_dir, tmp_path, monkeypatch
+        self,
+        sample_thread_response,
+        mock_env_api_key,
+        temp_config_dir,
+        tmp_path,
+        monkeypatch,
     ):
         """Test threads command with default limit (1)."""
         # Clear env vars to test config fallback
@@ -402,7 +407,12 @@ class TestThreadsCommand:
 
     @responses.activate
     def test_threads_custom_limit(
-        self, sample_thread_response, mock_env_api_key, temp_config_dir, tmp_path, monkeypatch
+        self,
+        sample_thread_response,
+        mock_env_api_key,
+        temp_config_dir,
+        tmp_path,
+        monkeypatch,
     ):
         """Test threads command with custom limit."""
         # Clear env vars to test config fallback
@@ -465,7 +475,12 @@ class TestThreadsCommand:
 
     @responses.activate
     def test_threads_custom_filename_pattern(
-        self, sample_thread_response, mock_env_api_key, temp_config_dir, tmp_path, monkeypatch
+        self,
+        sample_thread_response,
+        mock_env_api_key,
+        temp_config_dir,
+        tmp_path,
+        monkeypatch,
     ):
         """Test threads command with custom filename pattern."""
         # Clear env vars to test config fallback
